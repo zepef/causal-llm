@@ -319,17 +319,27 @@ export const usePipelineStore = create<PipelineState>()(
   }))
 );
 
-// Computed selectors
-export const usePipelineProgress = () =>
-  usePipelineStore((state) => ({
-    stage: state.stage,
-    isRunning: state.isRunning,
-    progress: state.progress,
-    error: state.error,
+// Computed selectors - use individual selectors to avoid hydration issues
+export const usePipelineProgress = () => {
+  const stage = usePipelineStore((state) => state.stage);
+  const isRunning = usePipelineStore((state) => state.isRunning);
+  const progress = usePipelineStore((state) => state.progress);
+  const error = usePipelineStore((state) => state.error);
+  const topicsCount = usePipelineStore((state) => state.topics.length);
+  const questionsCount = usePipelineStore((state) => state.questions.length);
+  const statementsCount = usePipelineStore((state) => state.statements.length);
+  const triplesCount = usePipelineStore((state) => state.triples.length);
+
+  return {
+    stage,
+    isRunning,
+    progress,
+    error,
     counts: {
-      topics: state.topics.length,
-      questions: state.questions.length,
-      statements: state.statements.length,
-      triples: state.triples.length,
+      topics: topicsCount,
+      questions: questionsCount,
+      statements: statementsCount,
+      triples: triplesCount,
     },
-  }));
+  };
+};
