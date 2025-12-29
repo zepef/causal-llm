@@ -108,12 +108,14 @@ export function UMAPVisualization({
   const highlightedNodes = useGraphStore((state) => state.highlightedNodes);
   const selectNode = useGraphStore((state) => state.selectNode);
   const highlightNeighbors = useGraphStore((state) => state.highlightNeighbors);
+  const analytics = useGraphStore((state) => state.analytics);
 
   // Get embedding data
   const umap3dProjections = useEmbeddingStore((state) => state.umap3dProjections);
   const showConnections = useEmbeddingStore((state) => state.showConnections);
   const connectionOpacity = useEmbeddingStore((state) => state.connectionOpacity);
   const hoverEmbedding = useEmbeddingStore((state) => state.hoverEmbedding);
+  const sizeBy = useEmbeddingStore((state) => state.sizeBy);
 
   // Handle container resize
   useEffect(() => {
@@ -130,6 +132,60 @@ export function UMAPVisualization({
     window.addEventListener('resize', updateDimensions);
     return () => window.removeEventListener('resize', updateDimensions);
   }, [width, height]);
+
+  // Compute node size based on sizeBy setting
+  const getNodeSize = useCallback((nodeId: string, isSelected: boolean): number => {
+    const baseSize = 4;
+    const maxExtra = 8; // Max additional size for centrality
+
+    if (isSelected) {
+      return baseSize * 2;
+    }
+
+    switch (sizeBy) {
+      case 'uniform':
+        return baseSize;
+
+      case 'degree': {
+        const degree = graph.getDegree(nodeId);
+        return baseSize + Math.min(degree * 0.5, 6);
+      }
+
+      case 'pagerank': {
+        if (!analytics?.pageRank) {
+          // Fallback to degree if analytics not computed
+          const degree = graph.getDegree(nodeId);
+          return baseSize + Math.min(degree * 0.5, 6);
+        }
+        const score = analytics.pageRank.get(nodeId) || 0;
+        // PageRank is already normalized, scale to visual size
+        return baseSize + score * maxExtra * 10;
+      }
+
+      case 'betweenness': {
+        if (!analytics?.betweenness) {
+          const degree = graph.getDegree(nodeId);
+          return baseSize + Math.min(degree * 0.5, 6);
+        }
+        const score = analytics.betweenness.get(nodeId) || 0;
+        // Betweenness is normalized 0-1, scale to visual size
+        return baseSize + score * maxExtra;
+      }
+
+      case 'closeness': {
+        if (!analytics?.closeness) {
+          const degree = graph.getDegree(nodeId);
+          return baseSize + Math.min(degree * 0.5, 6);
+        }
+        const score = analytics.closeness.get(nodeId) || 0;
+        // Closeness is normalized 0-1, scale to visual size
+        return baseSize + score * maxExtra;
+      }
+
+      default:
+        return baseSize;
+    }
+  }, [sizeBy, analytics, graph]);
 
   // Transform store data to graph format
   const graphData: GraphData = useMemo(() => {
@@ -149,10 +205,8 @@ export function UMAPVisualization({
         color = '#fbbf24'; // amber highlight
       }
 
-      // Determine size based on degree
-      const degree = graph.getDegree(node.id);
-      const baseSize = 4;
-      const size = isSelected ? baseSize * 2 : baseSize + Math.min(degree * 0.5, 6);
+      // Determine size based on sizeBy setting
+      const size = getNodeSize(node.id, isSelected);
 
       return {
         id: node.id,
@@ -176,7 +230,7 @@ export function UMAPVisualization({
       : [];
 
     return { nodes: graphNodes, links: graphLinks };
-  }, [graph, umap3dProjections, selectedNodeId, highlightedNodes, showConnections]);
+  }, [graph, umap3dProjections, selectedNodeId, highlightedNodes, showConnections, getNodeSize]);
 
   // Handle node click
   const handleNodeClick = useCallback(

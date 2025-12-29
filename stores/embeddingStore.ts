@@ -40,7 +40,7 @@ interface EmbeddingState {
 
   // View settings
   colorBy: 'domain' | 'centrality' | 'cluster' | 'none';
-  sizeBy: 'degree' | 'centrality' | 'uniform';
+  sizeBy: 'degree' | 'pagerank' | 'betweenness' | 'closeness' | 'uniform';
   showConnections: boolean;
   connectionOpacity: number;
 

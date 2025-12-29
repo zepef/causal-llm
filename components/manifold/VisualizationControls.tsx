@@ -26,7 +26,7 @@ export function VisualizationControls({
     setConnectionOpacity,
   } = useEmbeddingStore();
 
-  const { is3DMode, toggle3DMode, showLabels, toggleLabels } = useGraphStore();
+  const { is3DMode, toggle3DMode, showLabels, toggleLabels, analyticsComputed } = useGraphStore();
 
   return (
     <div className="bg-gray-900 rounded-lg p-4 border border-gray-800 space-y-4">
@@ -136,10 +136,18 @@ export function VisualizationControls({
             onChange={(e) => setSizeBy(e.target.value as typeof sizeBy)}
             className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white"
           >
-            <option value="degree">Degree</option>
-            <option value="centrality">Centrality</option>
+            <option value="degree">Degree (Connections)</option>
+            <option value="pagerank">PageRank (Importance)</option>
+            <option value="betweenness">Betweenness (Bridge)</option>
+            <option value="closeness">Closeness (Reach)</option>
             <option value="uniform">Uniform</option>
           </select>
+          {/* Hint for centrality metrics */}
+          {(sizeBy === 'pagerank' || sizeBy === 'betweenness' || sizeBy === 'closeness') && !analyticsComputed && (
+            <p className="text-xs text-yellow-500 mt-1">
+              Compute analytics in the Analytics tab for accurate sizing
+            </p>
+          )}
         </div>
       </div>
 
