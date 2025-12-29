@@ -4,7 +4,7 @@
 import { enableMapSet } from 'immer';
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import type { CausalNode, CausalEdge, RelationType, GraphStats } from '@/types/graph';
+import type { CausalNode, CausalEdge, RelationType, GraphStats, CausalQueryResult, GraphAnalytics } from '@/types/graph';
 import { CausalGraph } from '@/lib/graph/CausalGraph';
 
 // Enable Immer MapSet plugin
@@ -24,6 +24,8 @@ interface GraphState {
   filterByDomain: string | null;
   filterByRelationType: RelationType | null;
   searchQuery: string;
+  filteredNodeIds: Set<string> | null;
+  filteredEdgeIds: Set<string> | null;
 
   // View state
   showLabels: boolean;
@@ -32,6 +34,13 @@ interface GraphState {
 
   // Computed (cached)
   stats: GraphStats | null;
+
+  // Query results
+  queryResult: CausalQueryResult | null;
+
+  // Analytics results (cached)
+  analytics: GraphAnalytics | null;
+  analyticsComputed: boolean;
 
   // Actions
   addNode: (node: CausalNode) => void;
@@ -51,6 +60,8 @@ interface GraphState {
   setDomainFilter: (domain: string | null) => void;
   setRelationFilter: (relationType: RelationType | null) => void;
   setSearchQuery: (query: string) => void;
+  setFilteredNodeIds: (ids: Set<string> | null) => void;
+  setFilteredEdgeIds: (ids: Set<string> | null) => void;
 
   // View
   toggleLabels: () => void;
@@ -66,6 +77,21 @@ interface GraphState {
   getFilteredNodes: () => CausalNode[];
   getFilteredEdges: () => CausalEdge[];
   refreshStats: () => void;
+
+  // Causal Queries
+  queryCauses: (nodeId: string) => void;
+  queryEffects: (nodeId: string) => void;
+  queryAncestors: (nodeId: string) => void;
+  queryDescendants: (nodeId: string) => void;
+  queryRootCauses: (nodeId: string) => void;
+  queryUltimateEffects: (nodeId: string) => void;
+  queryPath: (fromId: string, toId: string) => void;
+  clearQueryResult: () => void;
+  highlightQueryResults: () => void;
+
+  // Analytics
+  computeAnalytics: () => void;
+  clearAnalytics: () => void;
 }
 
 export const useGraphStore = create<GraphState>()(
@@ -79,10 +105,15 @@ export const useGraphStore = create<GraphState>()(
     filterByDomain: null,
     filterByRelationType: null,
     searchQuery: '',
+    filteredNodeIds: null,
+    filteredEdgeIds: null,
     showLabels: true,
     showEdgeLabels: false,
     is3DMode: true,
     stats: null,
+    queryResult: null,
+    analytics: null,
+    analyticsComputed: false,
 
     // Node operations
     addNode: (node) =>
@@ -180,6 +211,16 @@ export const useGraphStore = create<GraphState>()(
     setSearchQuery: (query) =>
       set((state) => {
         state.searchQuery = query;
+      }),
+
+    setFilteredNodeIds: (ids) =>
+      set((state) => {
+        state.filteredNodeIds = ids;
+      }),
+
+    setFilteredEdgeIds: (ids) =>
+      set((state) => {
+        state.filteredEdgeIds = ids;
       }),
 
     // View
@@ -286,6 +327,139 @@ export const useGraphStore = create<GraphState>()(
       set((state) => {
         state.stats = state.graph.getStats();
       }),
+
+    // Causal Query Actions
+    queryCauses: (nodeId) =>
+      set((state) => {
+        const results = state.graph.findCauses(nodeId);
+        state.queryResult = {
+          query: 'causes',
+          sourceNodeId: nodeId,
+          results,
+        };
+      }),
+
+    queryEffects: (nodeId) =>
+      set((state) => {
+        const results = state.graph.findEffects(nodeId);
+        state.queryResult = {
+          query: 'effects',
+          sourceNodeId: nodeId,
+          results,
+        };
+      }),
+
+    queryAncestors: (nodeId) =>
+      set((state) => {
+        const results = state.graph.findAllAncestors(nodeId);
+        state.queryResult = {
+          query: 'ancestors',
+          sourceNodeId: nodeId,
+          results,
+        };
+      }),
+
+    queryDescendants: (nodeId) =>
+      set((state) => {
+        const results = state.graph.findAllDescendants(nodeId);
+        state.queryResult = {
+          query: 'descendants',
+          sourceNodeId: nodeId,
+          results,
+        };
+      }),
+
+    queryRootCauses: (nodeId) =>
+      set((state) => {
+        const results = state.graph.findRootCauses(nodeId);
+        state.queryResult = {
+          query: 'rootCauses',
+          sourceNodeId: nodeId,
+          results,
+        };
+      }),
+
+    queryUltimateEffects: (nodeId) =>
+      set((state) => {
+        const results = state.graph.findUltimateEffects(nodeId);
+        state.queryResult = {
+          query: 'ultimateEffects',
+          sourceNodeId: nodeId,
+          results,
+        };
+      }),
+
+    queryPath: (fromId, toId) =>
+      set((state) => {
+        const paths = state.graph.findCausalPaths(fromId, toId, 10);
+        const shortestPath = state.graph.findShortestPath(fromId, toId);
+
+        // Collect all nodes on the paths
+        const nodeIds = new Set<string>();
+        for (const path of paths) {
+          for (const id of path) {
+            nodeIds.add(id);
+          }
+        }
+
+        const results = Array.from(nodeIds)
+          .map((id) => state.graph.getNode(id))
+          .filter((n): n is CausalNode => n !== undefined);
+
+        state.queryResult = {
+          query: 'path',
+          sourceNodeId: fromId,
+          targetNodeId: toId,
+          results,
+          paths: shortestPath ? [shortestPath, ...paths.filter(p => p.length > shortestPath.length)] : paths,
+        };
+      }),
+
+    clearQueryResult: () =>
+      set((state) => {
+        state.queryResult = null;
+      }),
+
+    highlightQueryResults: () =>
+      set((state) => {
+        if (!state.queryResult) return;
+
+        state.highlightedNodes.clear();
+        state.highlightedEdges.clear();
+
+        // Add the source node
+        state.highlightedNodes.add(state.queryResult.sourceNodeId);
+
+        // Add target node if it's a path query
+        if (state.queryResult.targetNodeId) {
+          state.highlightedNodes.add(state.queryResult.targetNodeId);
+        }
+
+        // Add all result nodes
+        for (const node of state.queryResult.results) {
+          state.highlightedNodes.add(node.id);
+        }
+
+        // Find and highlight edges between highlighted nodes
+        for (const edge of state.graph.getAllEdges()) {
+          if (state.highlightedNodes.has(edge.source) && state.highlightedNodes.has(edge.target)) {
+            state.highlightedEdges.add(edge.id);
+          }
+        }
+      }),
+
+    // Analytics Actions
+    computeAnalytics: () =>
+      set((state) => {
+        state.analytics = state.graph.getAnalytics();
+        state.analyticsComputed = true;
+      }),
+
+    clearAnalytics: () =>
+      set((state) => {
+        state.analytics = null;
+        state.analyticsComputed = false;
+      }),
   }))
 );
 
@@ -308,3 +482,9 @@ export const useGraphStats = () =>
     // Use cached stats if available, otherwise compute on-demand
     return state.stats ?? state.graph.getStats();
   });
+
+export const useQueryResult = () =>
+  useGraphStore((state) => state.queryResult);
+
+export const useGraphAnalytics = () =>
+  useGraphStore((state) => state.analytics);

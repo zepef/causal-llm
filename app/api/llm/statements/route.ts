@@ -16,21 +16,23 @@ const requestSchema = z.object({
   context: z.string().optional(),
   questionId: z.string().optional(),
   projectId: z.string().optional(),
+  apiKey: z.string().optional(),
 });
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { question, context, questionId } = requestSchema.parse(body);
+    const { question, context, questionId, apiKey } = requestSchema.parse(body);
 
     // Generate the prompt
     const prompt = statementGenerationPrompt(question, context);
 
-    // Call Claude API
+    // Call Claude API with optional API key
     const response = await createJsonMessage<StatementGenerationResponse>(prompt, {
       model: DEFAULT_MODEL,
       systemPrompt: STATEMENT_GENERATION_SYSTEM,
       temperature: 0.7,
+      apiKey,
     });
 
     // Add IDs to statements

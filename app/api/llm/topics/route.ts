@@ -17,12 +17,13 @@ const requestSchema = z.object({
   maxDepth: z.number().int().min(1).max(10).default(5),
   context: z.string().optional(),
   projectId: z.string().optional(),
+  apiKey: z.string().optional(),
 });
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { topic, depth, maxDepth, context } = requestSchema.parse(body);
+    const { topic, depth, maxDepth, context, apiKey } = requestSchema.parse(body);
 
     // Don't expand if at max depth
     if (depth >= maxDepth) {
@@ -35,11 +36,12 @@ export async function POST(request: NextRequest) {
     // Generate the prompt
     const prompt = topicExpansionPrompt(topic, depth, maxDepth, context);
 
-    // Call Claude API
+    // Call Claude API with optional API key
     const response = await createJsonMessage<TopicExpansionResponse>(prompt, {
       model: DEFAULT_MODEL,
       systemPrompt: TOPIC_EXPANSION_SYSTEM,
       temperature: 0.7,
+      apiKey,
     });
 
     // Add IDs and depth to subtopics

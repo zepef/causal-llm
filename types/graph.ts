@@ -233,3 +233,25 @@ export interface CrossDomainAnalogy {
     similarity: number;
   }>;
 }
+
+/**
+ * Result of a causal query
+ */
+export interface CausalQueryResult {
+  query: 'causes' | 'effects' | 'ancestors' | 'descendants' | 'rootCauses' | 'ultimateEffects' | 'path';
+  sourceNodeId: string;
+  targetNodeId?: string;
+  results: CausalNode[];
+  paths?: string[][];
+}
+
+/**
+ * Graph analytics results
+ */
+export interface GraphAnalytics {
+  pageRank: Map<string, number>;
+  betweenness: Map<string, number>;
+  closeness: Map<string, number>;
+  connectedComponents: string[][];
+  stronglyConnectedComponents: string[][];
+}

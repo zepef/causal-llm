@@ -16,7 +16,17 @@
       "Bash(netstat:*)",
       "Bash(ping:*)",
       "Bash(npm run lint:*)",
-      "Bash(taskkill //F //PID 40864)"
+      "Bash(taskkill //F //PID 40864)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nImplement DEMOCRITUS framework for Large Causal Models\n\nCore Implementation:\n- CausalGraph class with adjacency lists and triangle detection\n- Zustand stores \\(graphStore, embeddingStore, pipelineStore\\)\n- Geometric Transformer with TensorFlow.js for simplicial complex processing\n- UMAP integration for 3D dimensionality reduction\n- react-force-graph-3d visualization\n\nLLM Pipeline \\(Modules 1-4\\):\n- Anthropic Claude client with rate limiting\n- Topic expansion, question generation, statement generation prompts\n- Triple extraction with relation type taxonomy\n- API routes for all LLM operations\n\nBug Fixes:\n- Fix TensorFlow.js tensor disposal in aggregateEdgesToNodes\n- Fix Zustand hydration error in useComputationStatus\n- Add Immer MapSet plugin to stores\n- Fix useGraphStats infinite loop \\(no state mutation in selector\\)\n- Replace Math.random with deterministic hash in UMAPVisualization\n- Fix lint errors and type annotations\n\nDatabase:\n- Prisma schema with SQLite for Projects, Topics, Questions, Statements, Triples\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(gh repo create:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(npx next build)",
+      "Bash(curl:*)",
+      "Bash(taskkill:*)",
+      "Bash(ls:*)",
+      "Bash(git restore:*)"
     ]
   }
 }

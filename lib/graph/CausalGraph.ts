@@ -7,6 +7,7 @@ import type {
   RelationType,
   SimplicialComplex,
   GraphStats,
+  GraphAnalytics,
   SerializedGraph,
   CausalGraphData,
 } from '@/types/graph';
@@ -223,6 +224,146 @@ export class CausalGraph {
     return this.getOutDegree(nodeId) + this.getInDegree(nodeId);
   }
 
+  // ============ Causal Queries ============
+
+  /**
+   * Find direct causes of a node (nodes with edges pointing TO this node)
+   */
+  findCauses(nodeId: string): CausalNode[] {
+    const causeIds = this.getInNeighbors(nodeId);
+    return causeIds.map(id => this.nodes.get(id)!).filter(Boolean);
+  }
+
+  /**
+   * Find direct effects of a node (nodes this node points TO)
+   */
+  findEffects(nodeId: string): CausalNode[] {
+    const effectIds = this.getOutNeighbors(nodeId);
+    return effectIds.map(id => this.nodes.get(id)!).filter(Boolean);
+  }
+
+  /**
+   * Find all ancestors (all upstream nodes via BFS)
+   */
+  findAllAncestors(nodeId: string): CausalNode[] {
+    const visited = new Set<string>();
+    const queue = [...this.getInNeighbors(nodeId)];
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (visited.has(current)) continue;
+      visited.add(current);
+
+      for (const ancestor of this.getInNeighbors(current)) {
+        if (!visited.has(ancestor)) {
+          queue.push(ancestor);
+        }
+      }
+    }
+
+    return Array.from(visited).map(id => this.nodes.get(id)!).filter(Boolean);
+  }
+
+  /**
+   * Find all descendants (all downstream nodes via BFS)
+   */
+  findAllDescendants(nodeId: string): CausalNode[] {
+    const visited = new Set<string>();
+    const queue = [...this.getOutNeighbors(nodeId)];
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (visited.has(current)) continue;
+      visited.add(current);
+
+      for (const descendant of this.getOutNeighbors(current)) {
+        if (!visited.has(descendant)) {
+          queue.push(descendant);
+        }
+      }
+    }
+
+    return Array.from(visited).map(id => this.nodes.get(id)!).filter(Boolean);
+  }
+
+  /**
+   * Find shortest path between two nodes (BFS)
+   */
+  findShortestPath(fromId: string, toId: string): string[] | null {
+    if (fromId === toId) return [fromId];
+    if (!this.hasNode(fromId) || !this.hasNode(toId)) return null;
+
+    const visited = new Set<string>([fromId]);
+    const queue: { nodeId: string; path: string[] }[] = [{ nodeId: fromId, path: [fromId] }];
+
+    while (queue.length > 0) {
+      const { nodeId, path } = queue.shift()!;
+
+      for (const neighbor of this.getOutNeighbors(nodeId)) {
+        if (neighbor === toId) {
+          return [...path, neighbor];
+        }
+
+        if (!visited.has(neighbor)) {
+          visited.add(neighbor);
+          queue.push({ nodeId: neighbor, path: [...path, neighbor] });
+        }
+      }
+    }
+
+    return null; // No path found
+  }
+
+  /**
+   * Find all causal paths between two nodes (DFS with max depth)
+   */
+  findCausalPaths(fromId: string, toId: string, maxDepth: number = 10): string[][] {
+    if (!this.hasNode(fromId) || !this.hasNode(toId)) return [];
+    if (fromId === toId) return [[fromId]];
+
+    const paths: string[][] = [];
+
+    const dfs = (current: string, path: string[], visited: Set<string>) => {
+      if (path.length > maxDepth) return;
+
+      if (current === toId) {
+        paths.push([...path]);
+        return;
+      }
+
+      for (const neighbor of this.getOutNeighbors(current)) {
+        if (!visited.has(neighbor)) {
+          visited.add(neighbor);
+          path.push(neighbor);
+          dfs(neighbor, path, visited);
+          path.pop();
+          visited.delete(neighbor);
+        }
+      }
+    };
+
+    const visited = new Set<string>([fromId]);
+    dfs(fromId, [fromId], visited);
+
+    return paths;
+  }
+
+  /**
+   * Find root causes - ancestors with no incoming edges
+   */
+  findRootCauses(nodeId: string): CausalNode[] {
+    const ancestors = this.findAllAncestors(nodeId);
+    return ancestors.filter(node => this.getInDegree(node.id) === 0);
+  }
+
+  /**
+   * Find ultimate effects - descendants with no outgoing edges
+   */
+  findUltimateEffects(nodeId: string): CausalNode[] {
+    const descendants = this.findAllDescendants(nodeId);
+    return descendants.filter(node => this.getOutDegree(node.id) === 0);
+  }
+
   // ============ Triangle Detection (for Geometric Transformer) ============
 
   /**
@@ -321,6 +462,275 @@ export class CausalGraph {
       avgDegree,
       density,
       hubNodes,
+    };
+  }
+
+  // ============ Graph Analytics ============
+
+  /**
+   * Calculate PageRank scores for all nodes
+   * @param damping - Damping factor (default 0.85)
+   * @param iterations - Number of iterations (default 20)
+   */
+  calculatePageRank(damping: number = 0.85, iterations: number = 20): Map<string, number> {
+    const nodes = this.getAllNodes();
+    const n = nodes.length;
+    if (n === 0) return new Map();
+
+    // Initialize PageRank scores
+    const pr = new Map<string, number>();
+    const initialScore = 1 / n;
+    for (const node of nodes) {
+      pr.set(node.id, initialScore);
+    }
+
+    // Iteratively update scores
+    for (let i = 0; i < iterations; i++) {
+      const newPr = new Map<string, number>();
+
+      for (const node of nodes) {
+        let incomingScore = 0;
+
+        // Sum contributions from incoming edges
+        for (const sourceId of this.getInNeighbors(node.id)) {
+          const sourceOutDegree = this.getOutDegree(sourceId);
+          if (sourceOutDegree > 0) {
+            incomingScore += (pr.get(sourceId) || 0) / sourceOutDegree;
+          }
+        }
+
+        // Apply damping factor
+        newPr.set(node.id, (1 - damping) / n + damping * incomingScore);
+      }
+
+      // Update scores
+      for (const [id, score] of newPr) {
+        pr.set(id, score);
+      }
+    }
+
+    return pr;
+  }
+
+  /**
+   * Calculate betweenness centrality for all nodes
+   * Measures how often a node appears on shortest paths between other nodes
+   */
+  calculateBetweennessCentrality(): Map<string, number> {
+    const nodes = this.getAllNodes();
+    const centrality = new Map<string, number>();
+
+    // Initialize to 0
+    for (const node of nodes) {
+      centrality.set(node.id, 0);
+    }
+
+    // For each pair of nodes, find shortest paths and count intermediaries
+    for (const source of nodes) {
+      // BFS to find all shortest paths from source
+      const dist = new Map<string, number>();
+      const paths = new Map<string, number>(); // Number of shortest paths to each node
+      const pred = new Map<string, string[]>(); // Predecessors on shortest paths
+
+      dist.set(source.id, 0);
+      paths.set(source.id, 1);
+
+      const queue: string[] = [source.id];
+      const stack: string[] = [];
+
+      while (queue.length > 0) {
+        const v = queue.shift()!;
+        stack.push(v);
+
+        for (const w of this.getOutNeighbors(v)) {
+          // First time seeing w
+          if (!dist.has(w)) {
+            dist.set(w, dist.get(v)! + 1);
+            queue.push(w);
+          }
+
+          // Shortest path to w via v
+          if (dist.get(w) === dist.get(v)! + 1) {
+            paths.set(w, (paths.get(w) || 0) + (paths.get(v) || 0));
+            if (!pred.has(w)) pred.set(w, []);
+            pred.get(w)!.push(v);
+          }
+        }
+      }
+
+      // Accumulate dependencies
+      const delta = new Map<string, number>();
+      for (const node of nodes) {
+        delta.set(node.id, 0);
+      }
+
+      while (stack.length > 0) {
+        const w = stack.pop()!;
+        for (const v of pred.get(w) || []) {
+          const contribution = (paths.get(v) || 0) / (paths.get(w) || 1) * (1 + (delta.get(w) || 0));
+          delta.set(v, (delta.get(v) || 0) + contribution);
+        }
+        if (w !== source.id) {
+          centrality.set(w, (centrality.get(w) || 0) + (delta.get(w) || 0));
+        }
+      }
+    }
+
+    // Normalize (for directed graph)
+    const n = nodes.length;
+    if (n > 2) {
+      const factor = 1 / ((n - 1) * (n - 2));
+      for (const [id, value] of centrality) {
+        centrality.set(id, value * factor);
+      }
+    }
+
+    return centrality;
+  }
+
+  /**
+   * Calculate closeness centrality for all nodes
+   * Measures how close a node is to all other reachable nodes
+   */
+  calculateClosenessCentrality(): Map<string, number> {
+    const nodes = this.getAllNodes();
+    const centrality = new Map<string, number>();
+
+    for (const source of nodes) {
+      // BFS to find distances to all reachable nodes
+      const dist = new Map<string, number>();
+      dist.set(source.id, 0);
+
+      const queue: string[] = [source.id];
+
+      while (queue.length > 0) {
+        const v = queue.shift()!;
+        for (const w of this.getOutNeighbors(v)) {
+          if (!dist.has(w)) {
+            dist.set(w, dist.get(v)! + 1);
+            queue.push(w);
+          }
+        }
+      }
+
+      // Calculate closeness (sum of distances to reachable nodes)
+      const reachable = dist.size - 1; // Exclude self
+      if (reachable > 0) {
+        let totalDist = 0;
+        for (const [id, d] of dist) {
+          if (id !== source.id) {
+            totalDist += d;
+          }
+        }
+        // Normalized closeness: (reachable / (n-1)) * (reachable / totalDist)
+        const n = nodes.length;
+        centrality.set(source.id, reachable > 0 ? (reachable / (n - 1)) * (reachable / totalDist) : 0);
+      } else {
+        centrality.set(source.id, 0);
+      }
+    }
+
+    return centrality;
+  }
+
+  /**
+   * Find connected components (treating graph as undirected)
+   */
+  findConnectedComponents(): CausalNode[][] {
+    const visited = new Set<string>();
+    const components: CausalNode[][] = [];
+
+    for (const node of this.getAllNodes()) {
+      if (visited.has(node.id)) continue;
+
+      const component: CausalNode[] = [];
+      const queue = [node.id];
+
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        if (visited.has(current)) continue;
+        visited.add(current);
+
+        const currentNode = this.nodes.get(current);
+        if (currentNode) component.push(currentNode);
+
+        // Add all neighbors (both directions)
+        for (const neighbor of this.getAllNeighbors(current)) {
+          if (!visited.has(neighbor)) {
+            queue.push(neighbor);
+          }
+        }
+      }
+
+      if (component.length > 0) {
+        components.push(component);
+      }
+    }
+
+    return components;
+  }
+
+  /**
+   * Find strongly connected components using Tarjan's algorithm
+   */
+  findStronglyConnectedComponents(): CausalNode[][] {
+    const nodes = this.getAllNodes();
+    const index = new Map<string, number>();
+    const lowlink = new Map<string, number>();
+    const onStack = new Set<string>();
+    const stack: string[] = [];
+    const sccs: CausalNode[][] = [];
+    let currentIndex = 0;
+
+    const strongconnect = (nodeId: string) => {
+      index.set(nodeId, currentIndex);
+      lowlink.set(nodeId, currentIndex);
+      currentIndex++;
+      stack.push(nodeId);
+      onStack.add(nodeId);
+
+      for (const neighbor of this.getOutNeighbors(nodeId)) {
+        if (!index.has(neighbor)) {
+          strongconnect(neighbor);
+          lowlink.set(nodeId, Math.min(lowlink.get(nodeId)!, lowlink.get(neighbor)!));
+        } else if (onStack.has(neighbor)) {
+          lowlink.set(nodeId, Math.min(lowlink.get(nodeId)!, index.get(neighbor)!));
+        }
+      }
+
+      // If nodeId is a root node, pop the stack and generate an SCC
+      if (lowlink.get(nodeId) === index.get(nodeId)) {
+        const scc: CausalNode[] = [];
+        let w: string;
+        do {
+          w = stack.pop()!;
+          onStack.delete(w);
+          const node = this.nodes.get(w);
+          if (node) scc.push(node);
+        } while (w !== nodeId);
+        sccs.push(scc);
+      }
+    };
+
+    for (const node of nodes) {
+      if (!index.has(node.id)) {
+        strongconnect(node.id);
+      }
+    }
+
+    return sccs;
+  }
+
+  /**
+   * Get comprehensive analytics for the graph
+   */
+  getAnalytics(): GraphAnalytics {
+    return {
+      pageRank: this.calculatePageRank(),
+      betweenness: this.calculateBetweennessCentrality(),
+      closeness: this.calculateClosenessCentrality(),
+      connectedComponents: this.findConnectedComponents().map(c => c.map(n => n.id)),
+      stronglyConnectedComponents: this.findStronglyConnectedComponents().map(c => c.map(n => n.id)),
     };
   }
 

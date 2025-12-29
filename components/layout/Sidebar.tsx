@@ -56,6 +56,12 @@ const navItems: NavItem[] = [
     icon: '🔮',
     description: 'Module 6: Topos Slices',
   },
+  {
+    href: '/settings',
+    label: 'Settings',
+    icon: '⚙️',
+    description: 'Configure API & options',
+  },
 ];
 
 export function Sidebar() {

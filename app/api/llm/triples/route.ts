@@ -18,12 +18,14 @@ const singleRequestSchema = z.object({
   statement: z.string().min(1, 'Statement is required'),
   statementId: z.string().optional(),
   projectId: z.string().optional(),
+  apiKey: z.string().optional(),
 });
 
 // Request validation schema for batch extraction
 const batchRequestSchema = z.object({
   statements: z.array(z.string().min(1)).min(1, 'At least one statement is required'),
   projectId: z.string().optional(),
+  apiKey: z.string().optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -54,16 +56,17 @@ export async function POST(request: NextRequest) {
 }
 
 async function handleSingleExtraction(body: unknown) {
-  const { statement, statementId } = singleRequestSchema.parse(body);
+  const { statement, statementId, apiKey } = singleRequestSchema.parse(body);
 
   // Generate the prompt
   const prompt = tripleExtractionPrompt(statement);
 
-  // Call Claude API
+  // Call Claude API with optional API key
   const response = await createJsonMessage<TripleExtractionResponse>(prompt, {
     model: DEFAULT_MODEL,
     systemPrompt: TRIPLE_EXTRACTION_SYSTEM,
     temperature: 0.3, // Lower temperature for more consistent extraction
+    apiKey,
   });
 
   // Process triples: normalize concept names and generate IDs
@@ -110,17 +113,18 @@ async function handleSingleExtraction(body: unknown) {
 }
 
 async function handleBatchExtraction(body: unknown) {
-  const { statements } = batchRequestSchema.parse(body);
+  const { statements, apiKey } = batchRequestSchema.parse(body);
 
   // Generate the batch prompt
   const prompt = batchTripleExtractionPrompt(statements);
 
-  // Call Claude API
+  // Call Claude API with optional API key
   const response = await createJsonMessage<BatchTripleExtractionResponse>(prompt, {
     model: DEFAULT_MODEL,
     systemPrompt: TRIPLE_EXTRACTION_SYSTEM,
     temperature: 0.3,
     maxTokens: 8192, // Larger for batch
+    apiKey,
   });
 
   // Process all results

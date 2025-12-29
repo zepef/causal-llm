@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { usePipelineStore } from '@/stores/pipelineStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import type { TopicNode } from '@/types/graph';
 
 export default function TopicsPage() {
@@ -16,6 +17,9 @@ export default function TopicsPage() {
   const addTopics = usePipelineStore((state) => state.addTopics);
   const pipelineTopics = usePipelineStore((state) => state.topics);
 
+  // Settings store - get API key
+  const anthropicApiKey = useSettingsStore((state) => state.anthropicApiKey);
+
   // Expand a topic via LLM
   const expandTopic = useCallback(async (
     topicName: string,
@@ -25,7 +29,7 @@ export default function TopicsPage() {
     const response = await fetch('/api/llm/topics', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ topic: topicName, depth, maxDepth: 5 }),
+      body: JSON.stringify({ topic: topicName, depth, maxDepth: 5, apiKey: anthropicApiKey || undefined }),
     });
 
     if (!response.ok) {
@@ -51,7 +55,7 @@ export default function TopicsPage() {
       expanded: false,
       questionCount: 0,
     }));
-  }, []);
+  }, [anthropicApiKey]);
 
   // Handle initial topic submission
   const handleSubmit = async (e: React.FormEvent) => {

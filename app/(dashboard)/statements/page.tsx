@@ -2,7 +2,10 @@
 
 import { useState, useCallback } from 'react';
 import { usePipelineStore } from '@/stores/pipelineStore';
-import type { CausalStatement } from '@/types/graph';
+import { useSettingsStore } from '@/stores/settingsStore';
+import { useBatchProcessor } from '@/hooks/useBatchProcessor';
+import { BatchProgress } from '@/components/ui/BatchProgress';
+import type { CausalStatement, CausalQuestion } from '@/types/graph';
 
 const confidenceColors: Record<string, string> = {
   high: 'bg-green-900/30 text-green-400 border-green-800',
@@ -38,6 +41,12 @@ export default function StatementsPage() {
   const pipelineStatements = usePipelineStore((state) => state.statements);
   const addStatements = usePipelineStore((state) => state.addStatements);
 
+  // Settings store - get API key
+  const anthropicApiKey = useSettingsStore((state) => state.anthropicApiKey);
+
+  // Batch processor
+  const { progress: batchProgress, processBatch, abort: abortBatch, isRunning: isBatchRunning } = useBatchProcessor<CausalQuestion, CausalStatement[]>();
+
   // Generate statements for a single question
   const generateStatementsForQuestion = useCallback(async (
     questionText: string,
@@ -49,6 +58,7 @@ export default function StatementsPage() {
       body: JSON.stringify({
         question: questionText,
         questionId,
+        apiKey: anthropicApiKey || undefined,
       }),
     });
 
@@ -75,7 +85,7 @@ export default function StatementsPage() {
       questionId,
       triples: [],
     }));
-  }, []);
+  }, [anthropicApiKey]);
 
   // Handle manual question submission
   const handleManualSubmit = async (e: React.FormEvent) => {
@@ -139,6 +149,62 @@ export default function StatementsPage() {
     setGeneratingQuestionId(null);
     setIsLoading(false);
     setSelectedQuestionIds(new Set());
+  };
+
+  // Batch generate for all questions
+  const handleGenerateForAll = async () => {
+    const questionsWithoutStatements = pipelineQuestions.filter(
+      (q) => !statements.some((s) => s.questionId === q.id)
+    );
+
+    if (questionsWithoutStatements.length === 0) {
+      setError('All questions already have statements generated');
+      return;
+    }
+
+    await processBatch({
+      items: questionsWithoutStatements,
+      processor: async (question) => {
+        const response = await fetch('/api/llm/statements', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            question: question.text,
+            questionId: question.id,
+            apiKey: anthropicApiKey || undefined,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to generate statements');
+        }
+
+        const data = await response.json();
+        return data.statements.map((s: {
+          id: string;
+          text: string;
+          cause: string;
+          effect: string;
+          mechanism: string;
+          confidence: number;
+        }) => ({
+          id: s.id,
+          text: s.text,
+          cause: s.cause,
+          effect: s.effect,
+          mechanism: s.mechanism,
+          confidence: s.confidence,
+          questionId: question.id,
+          triples: [],
+        }));
+      },
+      onItemComplete: (_, result) => {
+        setStatements((prev) => [...prev, ...result]);
+        addStatements(result);
+      },
+      getItemLabel: (q) => q.text.slice(0, 50) + '...',
+      delayBetweenItems: 1000,
+    });
   };
 
   // Toggle question selection
@@ -242,6 +308,22 @@ export default function StatementsPage() {
                     Clear
                   </button>
                 </div>
+
+                {/* Generate All Button */}
+                <button
+                  onClick={handleGenerateForAll}
+                  disabled={isBatchRunning || !anthropicApiKey}
+                  className="w-full mb-3 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium"
+                >
+                  {isBatchRunning ? 'Processing...' : 'Generate All'}
+                </button>
+
+                {/* Batch Progress */}
+                {(isBatchRunning || batchProgress.total > 0) && (
+                  <div className="mb-3">
+                    <BatchProgress progress={batchProgress} onCancel={abortBatch} />
+                  </div>
+                )}
 
                 <div className="max-h-64 overflow-y-auto space-y-1">
                   {pipelineQuestions.map(question => {

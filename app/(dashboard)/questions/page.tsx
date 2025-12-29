@@ -2,7 +2,10 @@
 
 import { useState, useCallback } from 'react';
 import { usePipelineStore } from '@/stores/pipelineStore';
-import type { CausalQuestion } from '@/types/graph';
+import { useSettingsStore } from '@/stores/settingsStore';
+import { useBatchProcessor } from '@/hooks/useBatchProcessor';
+import { BatchProgress } from '@/components/ui/BatchProgress';
+import type { CausalQuestion, TopicNode } from '@/types/graph';
 
 const questionTypeColors: Record<string, string> = {
   cause: 'bg-red-900/30 text-red-400 border-red-800',
@@ -32,6 +35,12 @@ export default function QuestionsPage() {
   const pipelineQuestions = usePipelineStore((state) => state.questions);
   const addQuestions = usePipelineStore((state) => state.addQuestions);
 
+  // Settings store - get API key
+  const anthropicApiKey = useSettingsStore((state) => state.anthropicApiKey);
+
+  // Batch processor
+  const { progress: batchProgress, processBatch, abort: abortBatch, isRunning: isBatchRunning } = useBatchProcessor<TopicNode, CausalQuestion[]>();
+
   // Generate questions for a single topic
   const generateQuestionsForTopic = useCallback(async (
     topicName: string,
@@ -44,6 +53,7 @@ export default function QuestionsPage() {
         topic: topicName,
         topicId,
         existingQuestions: questions.map(q => q.text),
+        apiKey: anthropicApiKey || undefined,
       }),
     });
 
@@ -65,7 +75,7 @@ export default function QuestionsPage() {
       variables: q.variables,
       topicId,
     }));
-  }, [questions]);
+  }, [questions, anthropicApiKey]);
 
   // Handle manual topic submission
   const handleManualSubmit = async (e: React.FormEvent) => {
@@ -129,6 +139,59 @@ export default function QuestionsPage() {
     setGeneratingTopicId(null);
     setIsLoading(false);
     setSelectedTopicIds(new Set());
+  };
+
+  // Batch generate for all topics
+  const handleGenerateForAll = async () => {
+    // Filter to topics without questions
+    const topicsWithoutQuestions = pipelineTopics.filter(
+      (t) => !questions.some((q) => q.topicId === t.id)
+    );
+
+    if (topicsWithoutQuestions.length === 0) {
+      setError('All topics already have questions generated');
+      return;
+    }
+
+    await processBatch({
+      items: topicsWithoutQuestions,
+      processor: async (topic) => {
+        const response = await fetch('/api/llm/questions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            topic: topic.name,
+            topicId: topic.id,
+            existingQuestions: questions.map(q => q.text),
+            apiKey: anthropicApiKey || undefined,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to generate questions');
+        }
+
+        const data = await response.json();
+        return data.questions.map((q: {
+          id: string;
+          text: string;
+          type: 'cause' | 'effect' | 'mechanism' | 'condition';
+          variables: string[];
+        }) => ({
+          id: q.id,
+          text: q.text,
+          type: q.type,
+          variables: q.variables,
+          topicId: topic.id,
+        }));
+      },
+      onItemComplete: (_, result) => {
+        setQuestions((prev) => [...prev, ...result]);
+        addQuestions(result);
+      },
+      getItemLabel: (topic) => topic.name,
+      delayBetweenItems: 1000, // 1 second delay to avoid rate limiting
+    });
   };
 
   // Toggle topic selection
@@ -223,6 +286,22 @@ export default function QuestionsPage() {
                     Clear
                   </button>
                 </div>
+
+                {/* Generate All Button */}
+                <button
+                  onClick={handleGenerateForAll}
+                  disabled={isBatchRunning || !anthropicApiKey}
+                  className="w-full mb-3 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium"
+                >
+                  {isBatchRunning ? 'Processing...' : 'Generate All'}
+                </button>
+
+                {/* Batch Progress */}
+                {(isBatchRunning || batchProgress.total > 0) && (
+                  <div className="mb-3">
+                    <BatchProgress progress={batchProgress} onCancel={abortBatch} />
+                  </div>
+                )}
 
                 <div className="max-h-64 overflow-y-auto space-y-1">
                   {pipelineTopics.map(topic => {

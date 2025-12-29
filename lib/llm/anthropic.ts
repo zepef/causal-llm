@@ -3,9 +3,16 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 
-// Initialize the Anthropic client
-// API key is read from ANTHROPIC_API_KEY environment variable
-const anthropic = new Anthropic();
+// Create an Anthropic client with optional API key
+// Falls back to ANTHROPIC_API_KEY environment variable if not provided
+export function createAnthropicClient(apiKey?: string): Anthropic {
+  return new Anthropic({
+    apiKey: apiKey || process.env.ANTHROPIC_API_KEY,
+  });
+}
+
+// Default client using environment variable
+const anthropic = createAnthropicClient();
 
 // Rate limiting configuration
 const RATE_LIMIT = {
@@ -54,6 +61,7 @@ export async function createMessage(
     maxTokens?: number;
     systemPrompt?: string;
     temperature?: number;
+    apiKey?: string;
   } = {}
 ): Promise<string> {
   await checkRateLimit();
@@ -63,9 +71,13 @@ export async function createMessage(
     maxTokens = 4096,
     systemPrompt,
     temperature = 0.7,
+    apiKey,
   } = options;
 
-  const response = await anthropic.messages.create({
+  // Use provided API key or default client
+  const client = apiKey ? createAnthropicClient(apiKey) : anthropic;
+
+  const response = await client.messages.create({
     model,
     max_tokens: maxTokens,
     temperature,
@@ -156,6 +168,7 @@ export async function createJsonMessage<T>(
     maxTokens?: number;
     systemPrompt?: string;
     temperature?: number;
+    apiKey?: string;
   } = {}
 ): Promise<T> {
   const response = await createMessage(prompt, options);

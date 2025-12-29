@@ -2,7 +2,10 @@
 
 import { useState, useCallback } from 'react';
 import { usePipelineStore } from '@/stores/pipelineStore';
-import type { CausalTriple, RelationType } from '@/types/graph';
+import { useSettingsStore } from '@/stores/settingsStore';
+import { useBatchProcessor } from '@/hooks/useBatchProcessor';
+import { BatchProgress } from '@/components/ui/BatchProgress';
+import type { CausalTriple, CausalStatement, RelationType } from '@/types/graph';
 
 interface ExtractedTriple extends CausalTriple {
   id: string;
@@ -62,6 +65,12 @@ export default function TriplesPage() {
   const pipelineTriples = usePipelineStore((state) => state.triples);
   const addTriples = usePipelineStore((state) => state.addTriples);
 
+  // Settings store - get API key
+  const anthropicApiKey = useSettingsStore((state) => state.anthropicApiKey);
+
+  // Batch processor
+  const { progress: batchProgress, processBatch, abort: abortBatch, isRunning: isBatchRunning } = useBatchProcessor<CausalStatement, { triples: ExtractedTriple[]; concepts: ExtractedConcept[] }>();
+
   // Extract triples for a single statement
   const extractTriplesForStatement = useCallback(async (
     statementText: string,
@@ -73,6 +82,7 @@ export default function TriplesPage() {
       body: JSON.stringify({
         statement: statementText,
         statementId,
+        apiKey: anthropicApiKey || undefined,
       }),
     });
 
@@ -102,7 +112,7 @@ export default function TriplesPage() {
       triples: extractedTriples,
       concepts: data.concepts,
     };
-  }, []);
+  }, [anthropicApiKey]);
 
   // Handle manual statement submission
   const handleManualSubmit = async (e: React.FormEvent) => {
@@ -198,6 +208,40 @@ export default function TriplesPage() {
     setSelectedStatementIds(new Set());
   };
 
+  // Generate triples for all statements without triples (batch)
+  const handleGenerateForAll = async () => {
+    const statementsWithoutTriples = pipelineStatements.filter(
+      (s) => !triples.some((t) => t.statementId === s.id)
+    );
+
+    if (statementsWithoutTriples.length === 0) return;
+
+    await processBatch({
+      items: statementsWithoutTriples,
+      processor: async (statement) => {
+        return extractTriplesForStatement(statement.text, statement.id);
+      },
+      onItemComplete: (statement, result) => {
+        setTriples((prev) => [...prev, ...result.triples]);
+        setConcepts((prev) => {
+          const existing = new Set(prev.map((c) => c.normalized));
+          const newConcepts = result.concepts.filter((c) => !existing.has(c.normalized));
+          return [...prev, ...newConcepts];
+        });
+        addTriples(
+          result.triples.map((t) => ({
+            source: t.source,
+            relation: t.relation,
+            target: t.target,
+            confidence: t.confidence,
+          }))
+        );
+      },
+      getItemLabel: (statement) => statement.text.slice(0, 50) + '...',
+      delayBetweenItems: 1000,
+    });
+  };
+
   // Toggle statement selection
   const toggleStatementSelection = (statementId: string) => {
     setSelectedStatementIds(prev => {
@@ -281,9 +325,16 @@ export default function TriplesPage() {
               <span className="text-xs text-gray-500">{pipelineStatements.length} statements</span>
             </div>
 
+            {/* Batch Progress */}
+            {(isBatchRunning || batchProgress.total > 0) && (
+              <div className="mb-3">
+                <BatchProgress progress={batchProgress} onCancel={abortBatch} />
+              </div>
+            )}
+
             {pipelineStatements.length > 0 ? (
               <>
-                <div className="flex gap-2 mb-3">
+                <div className="flex gap-2 mb-3 flex-wrap">
                   <button
                     onClick={selectAllStatements}
                     className="text-xs px-2 py-1 bg-gray-800 text-gray-300 rounded hover:bg-gray-700"
@@ -295,6 +346,13 @@ export default function TriplesPage() {
                     className="text-xs px-2 py-1 bg-gray-800 text-gray-300 rounded hover:bg-gray-700"
                   >
                     Clear
+                  </button>
+                  <button
+                    onClick={handleGenerateForAll}
+                    disabled={isBatchRunning || pipelineStatements.every((s) => triples.some((t) => t.statementId === s.id))}
+                    className="text-xs px-2 py-1 bg-purple-600/30 text-purple-400 rounded hover:bg-purple-600/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isBatchRunning ? 'Processing...' : 'Generate All'}
                   </button>
                 </div>
 
