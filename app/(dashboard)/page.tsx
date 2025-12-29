@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { usePipelineStore } from '@/stores/pipelineStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { usePipelineRunner } from '@/hooks/usePipelineRunner';
+import { ProjectManager } from '@/components/ui/ProjectManager';
 
 interface ModuleCard {
   href: string;
@@ -48,14 +49,14 @@ const modules: ModuleCard[] = [
     title: 'Relational Manifold',
     description: 'Refine embeddings with Geometric Transformer. Visualize causal structure in 2D/3D with UMAP projections.',
     icon: '🌐',
-    status: 'coming',
+    status: 'ready',
   },
   {
     href: '/topos',
     title: 'Topos Slices',
     description: 'Organize domains as topos slices. Discover cross-domain analogies and integrate causal knowledge.',
     icon: '🔮',
-    status: 'coming',
+    status: 'ready',
   },
 ];
 
@@ -237,6 +238,11 @@ export default function DashboardPage() {
             ))}
           </div>
         </div>
+      </div>
+
+      {/* Project Management */}
+      <div className="mb-8">
+        <ProjectManager />
       </div>
 
       {/* Pipeline Modules */}

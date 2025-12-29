@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { UMAPVisualization } from '@/components/manifold/UMAPVisualization';
 import { VisualizationControls } from '@/components/manifold/VisualizationControls';
 import { NodeDetails } from '@/components/manifold/NodeDetails';
@@ -9,9 +9,11 @@ import { GraphSearch } from '@/components/ui/GraphSearch';
 import { VisualizationFilters } from '@/components/manifold/VisualizationFilters';
 import { CausalQueryPanel } from '@/components/graph/CausalQueryPanel';
 import { GraphAnalyticsPanel } from '@/components/graph/GraphAnalyticsPanel';
+import { GraphExport } from '@/components/manifold/GraphExport';
 import { useGraphStore } from '@/stores/graphStore';
 import { useEmbeddingStore, useComputationStatus } from '@/stores/embeddingStore';
 import { usePipelineStore } from '@/stores/pipelineStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { useGeometricTransformer } from '@/hooks/useGeometricTransformer';
 import {
   computeUMAPWithProgress,
@@ -27,6 +29,8 @@ type SidebarTab = 'info' | 'queries' | 'analytics';
 export default function ManifoldPage() {
   const [hoveredNode, setHoveredNode] = useState<CausalNode | null>(null);
   const [activeTab, setActiveTab] = useState<SidebarTab>('info');
+  const [useLlmEmbeddings, setUseLlmEmbeddings] = useState(false);
+  const [isGeneratingLlmEmbeddings, setIsGeneratingLlmEmbeddings] = useState(false);
 
   // Graph store
   const graph = useGraphStore((state) => state.graph);
@@ -45,6 +49,9 @@ export default function ManifoldPage() {
   const pipelineTopics = usePipelineStore((state) => state.topics);
   const pipelineQuestions = usePipelineStore((state) => state.questions);
   const pipelineStatements = usePipelineStore((state) => state.statements);
+
+  // Settings store (for API key)
+  const anthropicApiKey = useSettingsStore((state) => state.anthropicApiKey);
 
   // Geometric Transformer
   const {
@@ -101,8 +108,62 @@ export default function ManifoldPage() {
     }, 100);
   }, [processEmbeddings, handleComputeUMAP]);
 
+  // Generate LLM-based embeddings for concepts
+  const generateLlmEmbeddings = useCallback(async (
+    nodes: CausalNode[],
+    edges: CausalEdge[]
+  ): Promise<Array<{ conceptId: string; label: string; domain: string; vector: number[] }>> => {
+    if (!anthropicApiKey) {
+      throw new Error('API key required for LLM embeddings');
+    }
+
+    setIsGeneratingLlmEmbeddings(true);
+    setComputing(true, 'Generating LLM embeddings...');
+
+    try {
+      // Build relation context for each concept
+      const conceptRelations = new Map<string, Array<{ type: string; target: string }>>();
+      for (const edge of edges) {
+        if (!conceptRelations.has(edge.source)) {
+          conceptRelations.set(edge.source, []);
+        }
+        conceptRelations.get(edge.source)!.push({
+          type: edge.relationType,
+          target: edge.target,
+        });
+      }
+
+      // Prepare concepts for API
+      const concepts = nodes.map((node) => ({
+        id: node.id,
+        label: node.label,
+        domain: node.domain,
+        relations: conceptRelations.get(node.id)?.slice(0, 5), // Limit relations for token efficiency
+      }));
+
+      const response = await fetch('/api/embeddings/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': anthropicApiKey,
+        },
+        body: JSON.stringify({ concepts, embeddingDim: 128 }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate LLM embeddings');
+      }
+
+      const data = await response.json();
+      return data.embeddings;
+    } finally {
+      setIsGeneratingLlmEmbeddings(false);
+      setComputing(false);
+    }
+  }, [anthropicApiKey, setComputing]);
+
   // Load graph from pipeline triples
-  const handleLoadFromPipeline = useCallback(() => {
+  const handleLoadFromPipeline = useCallback(async () => {
     if (pipelineTriples.length === 0) {
       alert('No triples in pipeline. Extract triples first.');
       return;
@@ -152,14 +213,30 @@ export default function ManifoldPage() {
       };
     });
 
-    // Generate embeddings for concepts
-    // Use simple random embeddings for now (could be replaced with LLM embeddings later)
-    const embeddings = nodes.map((node) => ({
-      conceptId: node.id,
-      label: node.label,
-      domain: node.domain || 'default',
-      vector: Array.from({ length: 128 }, () => Math.random() * 2 - 1),
-    }));
+    // Generate embeddings
+    let embeddings;
+    if (useLlmEmbeddings && anthropicApiKey) {
+      try {
+        embeddings = await generateLlmEmbeddings(nodes, edges);
+      } catch (error) {
+        console.error('LLM embedding generation failed, falling back to random:', error);
+        // Fall back to random embeddings
+        embeddings = nodes.map((node) => ({
+          conceptId: node.id,
+          label: node.label,
+          domain: node.domain || 'default',
+          vector: generateDeterministicEmbedding(node.id + node.label, 128),
+        }));
+      }
+    } else {
+      // Use deterministic random embeddings
+      embeddings = nodes.map((node) => ({
+        conceptId: node.id,
+        label: node.label,
+        domain: node.domain || 'default',
+        vector: generateDeterministicEmbedding(node.id + node.label, 128),
+      }));
+    }
 
     // Load into stores
     loadGraph({ nodes, edges });
@@ -169,7 +246,7 @@ export default function ManifoldPage() {
     setTimeout(() => {
       handleComputeUMAP();
     }, 100);
-  }, [pipelineTriples, loadGraph, setEmbeddings, handleComputeUMAP]);
+  }, [pipelineTriples, loadGraph, setEmbeddings, handleComputeUMAP, useLlmEmbeddings, anthropicApiKey, generateLlmEmbeddings]);
 
   // Generate demo data (fallback)
   const handleGenerateDemo = useCallback(() => {
@@ -236,14 +313,29 @@ export default function ManifoldPage() {
           </div>
 
           <div className="flex items-center gap-3">
+            {/* LLM Embedding Toggle */}
+            {hasPipelineData && anthropicApiKey && (
+              <label className="flex items-center gap-2 text-sm text-gray-400 bg-gray-800 px-3 py-2 rounded-lg">
+                <input
+                  type="checkbox"
+                  checked={useLlmEmbeddings}
+                  onChange={(e) => setUseLlmEmbeddings(e.target.checked)}
+                  className="w-4 h-4 rounded bg-gray-700 border-gray-600"
+                  disabled={isGeneratingLlmEmbeddings}
+                />
+                <span>LLM Embeddings</span>
+              </label>
+            )}
+
             {nodeCount === 0 && (
               <>
                 {hasPipelineData && (
                   <button
                     onClick={handleLoadFromPipeline}
-                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                    disabled={isGeneratingLlmEmbeddings}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors text-sm font-medium"
                   >
-                    Load from Pipeline ({pipelineTriples.length} triples)
+                    {isGeneratingLlmEmbeddings ? 'Generating...' : `Load from Pipeline (${pipelineTriples.length} triples)`}
                   </button>
                 )}
                 <button
@@ -505,6 +597,9 @@ export default function ManifoldPage() {
                 </div>
               </div>
             )}
+
+            {/* Graph Export */}
+            <GraphExport />
           </>
         )}
 
@@ -555,4 +650,27 @@ function inferDomain(conceptName: string): string {
   }
 
   return 'default';
+}
+
+// Generate deterministic embedding from a string seed
+function generateDeterministicEmbedding(seed: string, dim: number): number[] {
+  // Simple hash function for deterministic randomness
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    const char = seed.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  hash = Math.abs(hash);
+
+  const vector: number[] = [];
+  for (let i = 0; i < dim; i++) {
+    // Use hash to seed deterministic values
+    const val = Math.sin(hash + i * 17) * Math.cos(hash + i * 23);
+    vector.push(val);
+  }
+
+  // Normalize to unit length
+  const magnitude = Math.sqrt(vector.reduce((sum, v) => sum + v * v, 0));
+  return vector.map((v) => v / (magnitude || 1));
 }

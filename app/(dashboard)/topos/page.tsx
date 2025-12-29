@@ -3,7 +3,8 @@
 import { useState, useMemo } from 'react';
 import { useGraphStore } from '@/stores/graphStore';
 import { usePipelineStore } from '@/stores/pipelineStore';
-import type { CausalNode, CausalEdge } from '@/types/graph';
+import { createSliceManager } from '@/lib/topos/slice-manager';
+import type { CausalNode, CausalEdge, CrossDomainAnalogy, SliceFunctor } from '@/types/graph';
 
 interface DomainSlice {
   id: string;
@@ -19,18 +20,6 @@ interface CrossDomainConnection {
   targetDomain: string;
   edges: CausalEdge[];
   strength: number; // Number of connections
-}
-
-interface DomainAnalogy {
-  domain1: string;
-  domain2: string;
-  similarPatterns: Array<{
-    pattern: string;
-    description: string;
-    nodes1: string[];
-    nodes2: string[];
-  }>;
-  similarity: number;
 }
 
 const DOMAIN_COLORS: Record<string, string> = {
@@ -60,12 +49,25 @@ const DOMAIN_LABELS: Record<string, string> = {
 export default function ToposPage() {
   const [selectedSlice, setSelectedSlice] = useState<string | null>(null);
   const [showCrossDomain, setShowCrossDomain] = useState(true);
+  const [selectedAnalogy, setSelectedAnalogy] = useState<CrossDomainAnalogy | null>(null);
 
   // Graph store
   const graph = useGraphStore((state) => state.graph);
 
   // Pipeline store for stats
   const pipelineTriples = usePipelineStore((state) => state.triples);
+
+  // Create slice manager and compute functorial mappings
+  const sliceManager = useMemo(() => {
+    if (graph.getNodeCount() === 0) return null;
+    return createSliceManager(graph);
+  }, [graph]);
+
+  // Compute cross-domain analogies using SliceManager
+  const functorialAnalogies = useMemo((): CrossDomainAnalogy[] => {
+    if (!sliceManager) return [];
+    return sliceManager.findAnalogies(0.15);
+  }, [sliceManager]);
 
   // Compute domain slices from graph
   const domainSlices = useMemo((): DomainSlice[] => {
@@ -154,60 +156,6 @@ export default function ToposPage() {
 
     return connections.sort((a, b) => b.strength - a.strength);
   }, [graph]);
-
-  // Detect structural analogies between domains
-  const domainAnalogies = useMemo((): DomainAnalogy[] => {
-    if (domainSlices.length < 2) return [];
-
-    const analogies: DomainAnalogy[] = [];
-
-    // Compare each pair of domains
-    for (let i = 0; i < domainSlices.length; i++) {
-      for (let j = i + 1; j < domainSlices.length; j++) {
-        const slice1 = domainSlices[i];
-        const slice2 = domainSlices[j];
-
-        // Find similar relation type patterns
-        const relTypes1 = countRelationTypes(slice1.internalEdges);
-        const relTypes2 = countRelationTypes(slice2.internalEdges);
-
-        const similarPatterns: DomainAnalogy['similarPatterns'] = [];
-
-        // Check for shared causal patterns
-        for (const [relType, count1] of Object.entries(relTypes1)) {
-          const count2 = relTypes2[relType] || 0;
-          if (count1 > 0 && count2 > 0) {
-            similarPatterns.push({
-              pattern: relType,
-              description: `Both domains use "${relType}" relationships`,
-              nodes1: slice1.internalEdges
-                .filter(e => e.relationType === relType)
-                .slice(0, 3)
-                .map(e => e.source),
-              nodes2: slice2.internalEdges
-                .filter(e => e.relationType === relType)
-                .slice(0, 3)
-                .map(e => e.source),
-            });
-          }
-        }
-
-        if (similarPatterns.length > 0) {
-          // Calculate similarity score based on structural overlap
-          const similarity = calculateStructuralSimilarity(slice1, slice2);
-
-          analogies.push({
-            domain1: slice1.domain,
-            domain2: slice2.domain,
-            similarPatterns,
-            similarity,
-          });
-        }
-      }
-    }
-
-    return analogies.sort((a, b) => b.similarity - a.similarity);
-  }, [domainSlices]);
 
   // Get selected slice details
   const selectedSliceData = useMemo(() => {
@@ -429,54 +377,100 @@ export default function ToposPage() {
               </div>
             )}
 
-            {/* Domain Analogies */}
-            {domainAnalogies.length > 0 && (
+            {/* Functorial Analogies - Using SliceManager */}
+            {functorialAnalogies.length > 0 && (
               <div className="bg-gray-900 rounded-lg p-4 border border-purple-800">
-                <h3 className="font-medium mb-3 text-purple-400">Structural Analogies</h3>
+                <h3 className="font-medium mb-3 text-purple-400">Functorial Mappings</h3>
                 <p className="text-sm text-gray-400 mb-4">
-                  Domains with similar causal structures
+                  Cross-domain analogies discovered via structure-preserving functors
                 </p>
                 <div className="space-y-3">
-                  {domainAnalogies.slice(0, 5).map((analogy, i) => (
+                  {functorialAnalogies.slice(0, 5).map((analogy, i) => (
                     <div
                       key={i}
-                      className="p-3 bg-gray-800 rounded-lg"
+                      className={`p-3 rounded-lg cursor-pointer transition-colors ${
+                        selectedAnalogy === analogy
+                          ? 'bg-purple-900/40 border border-purple-600'
+                          : 'bg-gray-800 hover:bg-gray-700'
+                      }`}
+                      onClick={() => setSelectedAnalogy(selectedAnalogy === analogy ? null : analogy)}
                     >
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
                           <div
                             className="w-3 h-3 rounded-full"
-                            style={{ backgroundColor: DOMAIN_COLORS[analogy.domain1] || DOMAIN_COLORS.default }}
+                            style={{ backgroundColor: DOMAIN_COLORS[analogy.sourceSlice.domain] || DOMAIN_COLORS.default }}
                           />
                           <span className="text-white text-sm">
-                            {DOMAIN_LABELS[analogy.domain1] || analogy.domain1}
+                            {DOMAIN_LABELS[analogy.sourceSlice.domain] || analogy.sourceSlice.domain}
                           </span>
-                          <span className="text-purple-400">≈</span>
+                          <span className="text-purple-400 font-mono">→</span>
                           <div
                             className="w-3 h-3 rounded-full"
-                            style={{ backgroundColor: DOMAIN_COLORS[analogy.domain2] || DOMAIN_COLORS.default }}
+                            style={{ backgroundColor: DOMAIN_COLORS[analogy.targetSlice.domain] || DOMAIN_COLORS.default }}
                           />
                           <span className="text-white text-sm">
-                            {DOMAIN_LABELS[analogy.domain2] || analogy.domain2}
+                            {DOMAIN_LABELS[analogy.targetSlice.domain] || analogy.targetSlice.domain}
                           </span>
                         </div>
                         <span className="text-sm text-purple-400">
-                          {(analogy.similarity * 100).toFixed(0)}% similar
+                          {(analogy.functor.similarity * 100).toFixed(0)}% similar
                         </span>
                       </div>
-                      <div className="flex flex-wrap gap-1">
-                        {analogy.similarPatterns.slice(0, 3).map((pattern, j) => (
-                          <span
-                            key={j}
-                            className="px-2 py-0.5 bg-purple-900/30 text-purple-300 rounded text-xs"
-                          >
-                            {pattern.pattern}
-                          </span>
-                        ))}
+                      <div className="text-xs text-gray-400">
+                        {analogy.functor.objectMap.size} concept mappings, {analogy.functor.morphismMap.size} relation mappings
                       </div>
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* Selected Analogy Details */}
+            {selectedAnalogy && (
+              <div className="bg-gray-900 rounded-lg p-4 border border-purple-600">
+                <h3 className="font-medium mb-3 text-purple-400">Analogous Concept Pairs</h3>
+                <p className="text-sm text-gray-400 mb-4">
+                  Structurally similar concepts across domains (functor object mapping)
+                </p>
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {selectedAnalogy.analogousPairs.slice(0, 15).map((pair, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center justify-between p-2 bg-gray-800 rounded"
+                    >
+                      <div className="flex items-center gap-3 flex-1">
+                        <div className="flex items-center gap-1">
+                          <div
+                            className="w-2 h-2 rounded-full"
+                            style={{ backgroundColor: DOMAIN_COLORS[selectedAnalogy.sourceSlice.domain] || DOMAIN_COLORS.default }}
+                          />
+                          <span className="text-white text-sm truncate max-w-[120px]">
+                            {pair.sourceConcept}
+                          </span>
+                        </div>
+                        <span className="text-purple-400 font-mono text-xs">↔</span>
+                        <div className="flex items-center gap-1">
+                          <div
+                            className="w-2 h-2 rounded-full"
+                            style={{ backgroundColor: DOMAIN_COLORS[selectedAnalogy.targetSlice.domain] || DOMAIN_COLORS.default }}
+                          />
+                          <span className="text-white text-sm truncate max-w-[120px]">
+                            {pair.targetConcept}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-xs text-gray-400 ml-2">
+                        {(pair.similarity * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                {selectedAnalogy.analogousPairs.length > 15 && (
+                  <p className="text-xs text-gray-500 mt-2">
+                    +{selectedAnalogy.analogousPairs.length - 15} more pairs
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -498,37 +492,3 @@ export default function ToposPage() {
   );
 }
 
-// Helper: Count relation types in edges
-function countRelationTypes(edges: CausalEdge[]): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const edge of edges) {
-    counts[edge.relationType] = (counts[edge.relationType] || 0) + 1;
-  }
-  return counts;
-}
-
-// Helper: Calculate structural similarity between two slices
-function calculateStructuralSimilarity(slice1: DomainSlice, slice2: DomainSlice): number {
-  const relTypes1 = countRelationTypes(slice1.internalEdges);
-  const relTypes2 = countRelationTypes(slice2.internalEdges);
-
-  const allTypes = new Set([...Object.keys(relTypes1), ...Object.keys(relTypes2)]);
-  if (allTypes.size === 0) return 0;
-
-  let sharedCount = 0;
-  for (const type of allTypes) {
-    if (relTypes1[type] && relTypes2[type]) {
-      sharedCount++;
-    }
-  }
-
-  // Normalize by total unique relation types
-  const similarity = sharedCount / allTypes.size;
-
-  // Boost similarity if both have similar edge density
-  const density1 = slice1.internalEdges.length / Math.max(slice1.nodes.length, 1);
-  const density2 = slice2.internalEdges.length / Math.max(slice2.nodes.length, 1);
-  const densityRatio = Math.min(density1, density2) / Math.max(density1, density2, 0.01);
-
-  return (similarity + densityRatio) / 2;
-}
