@@ -2,6 +2,9 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { usePipelineProgress } from '@/stores/pipelineStore';
+import { ProjectSelector } from '@/components/ui/ProjectSelector';
+import { useState } from 'react';
 
 interface NavItem {
   href: string;
@@ -57,6 +60,22 @@ const navItems: NavItem[] = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const [showProjects, setShowProjects] = useState(false);
+  const { stage, isRunning, counts } = usePipelineProgress();
+
+  const getStatusColor = () => {
+    if (isRunning) return 'bg-yellow-500 animate-pulse';
+    if (stage === 'complete') return 'bg-green-500';
+    if (stage === 'idle') return 'bg-gray-500';
+    return 'bg-blue-500';
+  };
+
+  const getStatusText = () => {
+    if (isRunning) return `Running: ${stage}`;
+    if (stage === 'complete') return 'Complete';
+    if (stage === 'idle') return 'Ready';
+    return `Paused: ${stage}`;
+  };
 
   return (
     <aside className="w-64 bg-gray-900 border-r border-gray-800 flex flex-col">
@@ -66,8 +85,24 @@ export function Sidebar() {
         <p className="text-xs text-gray-500 mt-1">Large Causal Models</p>
       </div>
 
+      {/* Project Toggle */}
+      <button
+        onClick={() => setShowProjects(!showProjects)}
+        className="mx-4 mt-4 px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm text-left flex items-center justify-between"
+      >
+        <span>Projects</span>
+        <span className="text-gray-400">{showProjects ? '▲' : '▼'}</span>
+      </button>
+
+      {/* Project Selector (collapsible) */}
+      {showProjects && (
+        <div className="px-4 py-2">
+          <ProjectSelector />
+        </div>
+      )}
+
       {/* Navigation */}
-      <nav className="flex-1 p-4 space-y-1">
+      <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
         {navItems.map((item) => {
           const isActive = pathname === item.href;
           return (
@@ -98,15 +133,18 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Pipeline Status (placeholder) */}
+      {/* Pipeline Status */}
       <div className="p-4 border-t border-gray-800">
         <div className="bg-gray-800 rounded-lg p-3">
           <div className="flex items-center gap-2 text-sm text-gray-400">
-            <span className="w-2 h-2 rounded-full bg-green-500" />
-            Pipeline Ready
+            <span className={`w-2 h-2 rounded-full ${getStatusColor()}`} />
+            {getStatusText()}
           </div>
-          <div className="mt-2 text-xs text-gray-500">
-            0 nodes · 0 edges
+          <div className="mt-2 text-xs text-gray-500 grid grid-cols-2 gap-1">
+            <span>{counts.topics} topics</span>
+            <span>{counts.questions} questions</span>
+            <span>{counts.statements} statements</span>
+            <span>{counts.triples} triples</span>
           </div>
         </div>
       </div>

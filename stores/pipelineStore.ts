@@ -3,7 +3,7 @@
 
 import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
-import type { TopicNode, CausalQuestion, CausalStatement, CausalTriple } from '@/types/graph';
+import type { TopicNode, CausalQuestion, CausalStatement, CausalTriple, RelationType } from '@/types/graph';
 
 type PipelineStage =
   | 'idle'
@@ -70,6 +70,12 @@ interface PipelineState {
 
   // Configuration
   updateConfig: (updates: Partial<PipelineState['config']>) => void;
+
+  // Persistence
+  saveToProject: (projectId: string) => Promise<boolean>;
+  loadFromProject: (projectId: string) => Promise<boolean>;
+  isSaving: boolean;
+  isLoading: boolean;
 }
 
 export const usePipelineStore = create<PipelineState>()(
@@ -93,6 +99,9 @@ export const usePipelineStore = create<PipelineState>()(
       embeddingDimension: 128,
       umapDimensions: 3,
     },
+
+    isSaving: false,
+    isLoading: false,
 
     // Actions
     startPipeline: (projectId, rootTopic) =>
@@ -180,6 +189,133 @@ export const usePipelineStore = create<PipelineState>()(
       set((state) => {
         Object.assign(state.config, updates);
       }),
+
+    // Persistence
+    saveToProject: async (projectId: string) => {
+      set((state) => {
+        state.isSaving = true;
+      });
+
+      try {
+        const state = usePipelineStore.getState();
+        const response = await fetch(`/api/projects/${projectId}/pipeline`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            topics: state.topics.map((t) => ({
+              id: t.id,
+              name: t.name,
+              description: t.description,
+            })),
+            questions: state.questions.map((q) => ({
+              id: q.id,
+              topicId: q.topicId,
+              text: q.text,
+              questionType: q.type,
+            })),
+            statements: state.statements.map((s) => ({
+              id: s.id,
+              questionId: s.questionId,
+              text: s.text,
+              confidence: s.confidence,
+              source: s.mechanism,
+            })),
+            triples: state.triples.map((t) => ({
+              id: `${t.source}-${t.relation}-${t.target}`,
+              subject: t.source,
+              predicate: t.relation,
+              object: t.target,
+              relationType: t.relation,
+              confidence: t.confidence,
+            })),
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to save pipeline');
+        }
+
+        set((state) => {
+          state.isSaving = false;
+          state.projectId = projectId;
+        });
+
+        return true;
+      } catch (error) {
+        console.error('Failed to save pipeline:', error);
+        set((state) => {
+          state.isSaving = false;
+          state.error = {
+            stage: state.stage,
+            message: 'Failed to save pipeline',
+            details: error instanceof Error ? error.message : String(error),
+          };
+        });
+        return false;
+      }
+    },
+
+    loadFromProject: async (projectId: string) => {
+      set((state) => {
+        state.isLoading = true;
+      });
+
+      try {
+        const response = await fetch(`/api/projects/${projectId}/pipeline`);
+
+        if (!response.ok) {
+          throw new Error('Failed to load pipeline');
+        }
+
+        const data = await response.json();
+        const { pipeline } = data;
+
+        set((state) => {
+          state.isLoading = false;
+          state.projectId = projectId;
+          state.topics = pipeline.topics.map((t: { id: string; name: string; description?: string }) => ({
+            id: t.id,
+            name: t.name,
+            description: t.description,
+          }));
+          state.questions = pipeline.questions.map((q: { id: string; topicId: string; text: string; questionType?: string }) => ({
+            id: q.id,
+            topicId: q.topicId,
+            text: q.text,
+            type: (q.questionType || 'cause') as 'cause' | 'effect' | 'mechanism' | 'condition',
+            variables: [] as string[],
+          }));
+          state.statements = pipeline.statements.map((s: { id: string; questionId?: string; text: string; confidence?: number; source?: string }) => ({
+            id: s.id,
+            questionId: s.questionId,
+            text: s.text,
+            confidence: s.confidence || 1.0,
+            mechanism: s.source,
+            triples: [] as CausalTriple[],
+          }));
+          state.triples = pipeline.triples.map((t: { subject: string; predicate: string; object: string; relationType?: string; confidence?: number }) => ({
+            source: t.subject,
+            relation: (t.relationType || t.predicate) as RelationType,
+            target: t.object,
+            confidence: t.confidence,
+          }));
+          state.stage = pipeline.triples.length > 0 ? 'complete' : 'idle';
+        });
+
+        return true;
+      } catch (error) {
+        console.error('Failed to load pipeline:', error);
+        set((state) => {
+          state.isLoading = false;
+          state.error = {
+            stage: state.stage,
+            message: 'Failed to load pipeline',
+            details: error instanceof Error ? error.message : String(error),
+          };
+        });
+        return false;
+      }
+    },
   }))
 );
 
