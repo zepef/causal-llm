@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(tree:*)",
+      "WebSearch",
+      "Bash(npm install:*)",
+      "Bash(npx prisma init)",
+      "Bash(npm run build:*)",
+      "Bash(npx prisma generate:*)",
+      "Bash(npx prisma db push)",
+      "mcp__byterover-mcp__byterover-store-knowledge",
+      "Bash(npm run dev:*)",
+      "Bash(timeout /t 5 /nobreak)",
+      "Bash(tasklist:*)",
+      "Bash(findstr:*)",
+      "Bash(netstat:*)",
+      "Bash(ping:*)",
+      "Bash(npm run lint:*)",
+      "Bash(taskkill //F //PID 40864)"
+    ]
+  }
+}

@@ -1,0 +1,194 @@
+// DEMOCRITUS - Large Causal Models from LLMs
+// Database schema for causal knowledge extraction and storage
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// Project container for causal models
+model Project {
+  id          String      @id @default(cuid())
+  name        String
+  description String?
+  domain      String?     // Primary domain (archaeology, biology, economics, etc.)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  topics      Topic[]
+  questions   Question[]
+  statements  Statement[]
+  triples     Triple[]
+  embeddings  Embedding[]
+  toposSlices ToposSlice[]
+}
+
+// Hierarchical topic tree (BFS expansion)
+model Topic {
+  id              String    @id @default(cuid())
+  name            String
+  description     String?
+  causalRelevance String?   // How this topic relates causally to parent
+  depth           Int       @default(0)
+
+  parentId        String?
+  parent          Topic?    @relation("TopicHierarchy", fields: [parentId], references: [id])
+  children        Topic[]   @relation("TopicHierarchy")
+
+  projectId       String
+  project         Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  questions       Question[]
+
+  createdAt       DateTime  @default(now())
+
+  @@index([projectId])
+  @@index([parentId])
+  @@index([depth])
+}
+
+// Causal questions generated from topics
+model Question {
+  id         String      @id @default(cuid())
+  text       String
+  type       String      // cause, effect, mechanism, condition
+  variables  String      // JSON-encoded array of variables involved in the question
+
+  topicId    String
+  topic      Topic       @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  projectId  String
+  project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  statements Statement[]
+
+  createdAt  DateTime    @default(now())
+
+  @@index([topicId])
+  @@index([projectId])
+}
+
+// Causal statements (natural language claims)
+model Statement {
+  id          String    @id @default(cuid())
+  text        String
+  cause       String?   // Extracted cause phrase
+  effect      String?   // Extracted effect phrase
+  mechanism   String?   // Underlying mechanism
+  confidence  Float     @default(1.0)
+
+  questionId  String?
+  question    Question? @relation(fields: [questionId], references: [id])
+
+  projectId   String
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  triples     Triple[]
+
+  createdAt   DateTime  @default(now())
+
+  @@index([projectId])
+  @@index([questionId])
+}
+
+// Unique causal concepts (nodes in the graph)
+model Concept {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  normalizedName String // Lowercase, trimmed for matching
+  description String?
+  domain      String?  // Domain this concept belongs to
+
+  sourceEdges Triple[] @relation("SourceConcept")
+  targetEdges Triple[] @relation("TargetConcept")
+
+  embedding   Embedding?
+
+  createdAt   DateTime @default(now())
+
+  @@index([name])
+  @@index([normalizedName])
+  @@index([domain])
+}
+
+// Relational triples (edges in the causal graph)
+model Triple {
+  id           String     @id @default(cuid())
+
+  sourceId     String
+  source       Concept    @relation("SourceConcept", fields: [sourceId], references: [id])
+
+  targetId     String
+  target       Concept    @relation("TargetConcept", fields: [targetId], references: [id])
+
+  relationType String     // causes, enables, prevents, increases, decreases, etc.
+  confidence   Float      @default(1.0)
+  weight       Float      @default(1.0)
+
+  statementId  String?
+  statement    Statement? @relation(fields: [statementId], references: [id])
+
+  projectId    String
+  project      Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  metadata     Json?      // Additional metadata
+
+  createdAt    DateTime   @default(now())
+
+  @@unique([sourceId, targetId, relationType]) // Prevent duplicate edges
+  @@index([sourceId])
+  @@index([targetId])
+  @@index([relationType])
+  @@index([projectId])
+}
+
+// Embeddings for concepts and triples
+model Embedding {
+  id         String   @id @default(cuid())
+
+  conceptId  String?  @unique
+  concept    Concept? @relation(fields: [conceptId], references: [id], onDelete: Cascade)
+
+  vector     String   // JSON-encoded high-dimensional embedding array
+  dimension  Int      // Embedding dimension
+
+  umap2d     String?  // JSON-encoded 2D UMAP projection [x, y]
+  umap3d     String?  // JSON-encoded 3D UMAP projection [x, y, z]
+
+  // Geometric Transformer refined embeddings
+  gtRefined  String?  // JSON-encoded refined embedding
+
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([conceptId])
+}
+
+// Topos slices for domain organization
+model ToposSlice {
+  id          String   @id @default(cuid())
+  domain      String   // Domain name
+  description String?
+
+  conceptIds  String   // JSON-encoded array of concept IDs in this slice
+
+  // Morphisms to other slices stored as JSON
+  // Format: { targetSliceId: { objectMap: {...}, morphismMap: {...} } }
+  morphisms   String?  // JSON-encoded morphisms
+
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([domain])
+  @@index([projectId])
+}
