@@ -7,6 +7,7 @@ import { NodeDetails } from '@/components/manifold/NodeDetails';
 import { DomainLegend } from '@/components/manifold/DomainLegend';
 import { useGraphStore } from '@/stores/graphStore';
 import { useEmbeddingStore, useComputationStatus } from '@/stores/embeddingStore';
+import { usePipelineStore } from '@/stores/pipelineStore';
 import { useGeometricTransformer } from '@/hooks/useGeometricTransformer';
 import {
   computeUMAPWithProgress,
@@ -14,7 +15,7 @@ import {
   projectionsToMap,
   generateRandomEmbeddings,
 } from '@/lib/embeddings/umap';
-import type { CausalNode } from '@/types/graph';
+import type { CausalNode, CausalEdge, RelationType } from '@/types/graph';
 import { generateEdgeId } from '@/lib/graph/CausalGraph';
 
 export default function ManifoldPage() {
@@ -31,6 +32,12 @@ export default function ManifoldPage() {
   const setComputing = useEmbeddingStore((state) => state.setComputing);
   const setProgress = useEmbeddingStore((state) => state.setProgress);
   const { isComputing, progress, message } = useComputationStatus();
+
+  // Pipeline store
+  const pipelineTriples = usePipelineStore((state) => state.triples);
+  const pipelineTopics = usePipelineStore((state) => state.topics);
+  const pipelineQuestions = usePipelineStore((state) => state.questions);
+  const pipelineStatements = usePipelineStore((state) => state.statements);
 
   // Geometric Transformer
   const {
@@ -87,7 +94,77 @@ export default function ManifoldPage() {
     }, 100);
   }, [processEmbeddings, handleComputeUMAP]);
 
-  // Generate demo data
+  // Load graph from pipeline triples
+  const handleLoadFromPipeline = useCallback(() => {
+    if (pipelineTriples.length === 0) {
+      alert('No triples in pipeline. Extract triples first.');
+      return;
+    }
+
+    // Extract unique concepts from triples
+    const conceptsMap = new Map<string, { name: string; relations: number }>();
+
+    for (const triple of pipelineTriples) {
+      // Normalize concept names for consistent IDs
+      const sourceId = triple.source.toLowerCase().replace(/\s+/g, '_');
+      const targetId = triple.target.toLowerCase().replace(/\s+/g, '_');
+
+      if (!conceptsMap.has(sourceId)) {
+        conceptsMap.set(sourceId, { name: triple.source, relations: 0 });
+      }
+      if (!conceptsMap.has(targetId)) {
+        conceptsMap.set(targetId, { name: triple.target, relations: 0 });
+      }
+
+      // Count relations for each concept
+      const sourceData = conceptsMap.get(sourceId)!;
+      sourceData.relations++;
+      const targetData = conceptsMap.get(targetId)!;
+      targetData.relations++;
+    }
+
+    // Create nodes from concepts
+    const nodes: CausalNode[] = Array.from(conceptsMap.entries()).map(([id, data]) => ({
+      id,
+      label: data.name,
+      type: 'concept' as const,
+      domain: inferDomain(data.name),
+    }));
+
+    // Create edges from triples
+    const edges: CausalEdge[] = pipelineTriples.map((triple, index) => {
+      const sourceId = triple.source.toLowerCase().replace(/\s+/g, '_');
+      const targetId = triple.target.toLowerCase().replace(/\s+/g, '_');
+
+      return {
+        id: generateEdgeId(sourceId, targetId, triple.relation) + `-${index}`,
+        source: sourceId,
+        target: targetId,
+        relationType: triple.relation,
+        confidence: triple.confidence || 0.8,
+      };
+    });
+
+    // Generate embeddings for concepts
+    // Use simple random embeddings for now (could be replaced with LLM embeddings later)
+    const embeddings = nodes.map((node) => ({
+      conceptId: node.id,
+      label: node.label,
+      domain: node.domain || 'default',
+      vector: Array.from({ length: 128 }, () => Math.random() * 2 - 1),
+    }));
+
+    // Load into stores
+    loadGraph({ nodes, edges });
+    setEmbeddings(embeddings);
+
+    // Compute UMAP
+    setTimeout(() => {
+      handleComputeUMAP();
+    }, 100);
+  }, [pipelineTriples, loadGraph, setEmbeddings, handleComputeUMAP]);
+
+  // Generate demo data (fallback)
   const handleGenerateDemo = useCallback(() => {
     // Generate random embeddings
     const embeddings = generateRandomEmbeddings(50, 128, 5);
@@ -116,10 +193,10 @@ export default function ManifoldPage() {
       const relationType = relationTypes[Math.floor(Math.random() * relationTypes.length)];
 
       edges.push({
-        id: generateEdgeId(nodes[sourceIdx].id, nodes[targetIdx].id, relationType as 'causes'),
+        id: generateEdgeId(nodes[sourceIdx].id, nodes[targetIdx].id, relationType as RelationType) + `-${i}`,
         source: nodes[sourceIdx].id,
         target: nodes[targetIdx].id,
-        relationType: relationType as 'causes',
+        relationType: relationType as RelationType,
         confidence: Math.random() * 0.5 + 0.5,
       });
     }
@@ -136,6 +213,7 @@ export default function ManifoldPage() {
 
   const nodeCount = graph.getNodeCount();
   const edgeCount = graph.getEdgeCount();
+  const hasPipelineData = pipelineTriples.length > 0;
 
   return (
     <div className="h-full flex gap-4">
@@ -152,16 +230,36 @@ export default function ManifoldPage() {
 
           <div className="flex items-center gap-3">
             {nodeCount === 0 && (
-              <button
-                onClick={handleGenerateDemo}
-                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm"
-              >
-                Generate Demo Data
-              </button>
+              <>
+                {hasPipelineData && (
+                  <button
+                    onClick={handleLoadFromPipeline}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                  >
+                    Load from Pipeline ({pipelineTriples.length} triples)
+                  </button>
+                )}
+                <button
+                  onClick={handleGenerateDemo}
+                  className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm"
+                >
+                  Generate Demo Data
+                </button>
+              </>
             )}
 
             {nodeCount > 0 && (
               <>
+                {hasPipelineData && (
+                  <button
+                    onClick={handleLoadFromPipeline}
+                    disabled={isComputing || isTransformerProcessing}
+                    className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 disabled:opacity-50 transition-colors text-sm"
+                    title="Reload graph from pipeline data"
+                  >
+                    Reload Pipeline
+                  </button>
+                )}
                 <button
                   onClick={handleRefineAndProject}
                   disabled={isComputing || isTransformerProcessing}
@@ -181,6 +279,44 @@ export default function ManifoldPage() {
             )}
           </div>
         </div>
+
+        {/* Pipeline Status */}
+        {nodeCount === 0 && (
+          <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
+            <h3 className="font-medium mb-3">Pipeline Status</h3>
+            <div className="grid grid-cols-4 gap-4 text-sm">
+              <div className="text-center">
+                <div className={`text-2xl font-bold ${pipelineTopics.length > 0 ? 'text-green-400' : 'text-gray-600'}`}>
+                  {pipelineTopics.length}
+                </div>
+                <div className="text-xs text-gray-500">Topics</div>
+              </div>
+              <div className="text-center">
+                <div className={`text-2xl font-bold ${pipelineQuestions.length > 0 ? 'text-green-400' : 'text-gray-600'}`}>
+                  {pipelineQuestions.length}
+                </div>
+                <div className="text-xs text-gray-500">Questions</div>
+              </div>
+              <div className="text-center">
+                <div className={`text-2xl font-bold ${pipelineStatements.length > 0 ? 'text-green-400' : 'text-gray-600'}`}>
+                  {pipelineStatements.length}
+                </div>
+                <div className="text-xs text-gray-500">Statements</div>
+              </div>
+              <div className="text-center">
+                <div className={`text-2xl font-bold ${pipelineTriples.length > 0 ? 'text-green-400' : 'text-gray-600'}`}>
+                  {pipelineTriples.length}
+                </div>
+                <div className="text-xs text-gray-500">Triples</div>
+              </div>
+            </div>
+            {!hasPipelineData && (
+              <p className="text-sm text-gray-500 mt-3 text-center">
+                Run the pipeline (Topics → Questions → Statements → Triples) to generate graph data
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Progress Bars */}
         {isTransformerProcessing && (
@@ -279,6 +415,21 @@ export default function ManifoldPage() {
           </div>
         </div>
 
+        {/* Pipeline Source */}
+        {nodeCount > 0 && hasPipelineData && (
+          <div className="bg-gray-900 rounded-lg p-4 border border-blue-800">
+            <h4 className="text-sm font-medium text-blue-400 mb-3">Data Source</h4>
+            <div className="text-sm text-gray-400">
+              <p>Loaded from pipeline:</p>
+              <ul className="mt-2 space-y-1 text-xs">
+                <li>• {pipelineTriples.length} triples extracted</li>
+                <li>• {nodeCount} unique concepts</li>
+                <li>• {edgeCount} causal relations</li>
+              </ul>
+            </div>
+          </div>
+        )}
+
         {/* Complex Stats (after transformer) */}
         {complexStats && (
           <div className="bg-gray-900 rounded-lg p-4 border border-green-800">
@@ -304,4 +455,41 @@ export default function ManifoldPage() {
       </div>
     </div>
   );
+}
+
+// Helper function to infer domain from concept name
+function inferDomain(conceptName: string): string {
+  const name = conceptName.toLowerCase();
+
+  // Simple keyword-based domain inference
+  if (name.includes('climate') || name.includes('temperature') || name.includes('weather') ||
+      name.includes('carbon') || name.includes('emission') || name.includes('warming')) {
+    return 'climate';
+  }
+  if (name.includes('health') || name.includes('disease') || name.includes('medical') ||
+      name.includes('patient') || name.includes('treatment') || name.includes('symptom')) {
+    return 'medicine';
+  }
+  if (name.includes('economy') || name.includes('market') || name.includes('price') ||
+      name.includes('income') || name.includes('gdp') || name.includes('inflation')) {
+    return 'economics';
+  }
+  if (name.includes('cell') || name.includes('gene') || name.includes('protein') ||
+      name.includes('organism') || name.includes('species') || name.includes('evolution')) {
+    return 'biology';
+  }
+  if (name.includes('stress') || name.includes('anxiety') || name.includes('depression') ||
+      name.includes('behavior') || name.includes('cognitive') || name.includes('mental')) {
+    return 'psychology';
+  }
+  if (name.includes('society') || name.includes('social') || name.includes('community') ||
+      name.includes('population') || name.includes('culture') || name.includes('group')) {
+    return 'sociology';
+  }
+  if (name.includes('energy') || name.includes('force') || name.includes('particle') ||
+      name.includes('quantum') || name.includes('wave') || name.includes('matter')) {
+    return 'physics';
+  }
+
+  return 'default';
 }
