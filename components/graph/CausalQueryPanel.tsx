@@ -78,6 +78,11 @@ export function CausalQueryPanel({ onNodeClick }: CausalQueryPanelProps) {
           queryPath(selectedNodeId, targetNodeId);
         }
         break;
+      case 'allPaths':
+        if (targetNodeId) {
+          queryPath(selectedNodeId, targetNodeId);
+        }
+        break;
     }
   };
 
@@ -185,33 +190,80 @@ export function CausalQueryPanel({ onNodeClick }: CausalQueryPanelProps) {
 
       {/* Path Finder */}
       <div className="border-t border-gray-800 pt-4 mb-4">
-        <h4 className="text-sm font-medium text-gray-300 mb-2">Path Finder</h4>
-        <div className="flex gap-2 mb-2">
-          <select
-            value={targetNodeId}
-            onChange={(e) => setTargetNodeId(e.target.value)}
-            className="flex-1 bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white"
-          >
-            <option value="">Select target node...</option>
+        <h4 className="text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
+          <span>🔍</span>
+          Shortest Path Finder
+        </h4>
+
+        {/* Target Node Search */}
+        <div className="mb-2">
+          <label className="text-xs text-gray-500 block mb-1">Target Node</label>
+          <input
+            type="text"
+            value={targetNodeId ? (graph.getNode(targetNodeId)?.label || '') : ''}
+            onChange={(e) => {
+              const found = allNodes.find(n =>
+                n.label.toLowerCase() === e.target.value.toLowerCase()
+              );
+              if (found) setTargetNodeId(found.id);
+            }}
+            placeholder="Search target..."
+            list="target-nodes"
+            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-yellow-500"
+          />
+          <datalist id="target-nodes">
             {allNodes.map((node) => (
-              <option key={node.id} value={node.id}>
-                {node.label}
-              </option>
+              <option key={node.id} value={node.label} />
             ))}
-          </select>
+          </datalist>
         </div>
-        <button
-          onClick={() => handleQuery('path')}
-          disabled={!selectedNodeId || !targetNodeId}
-          className="w-full px-3 py-2 bg-yellow-600/30 text-yellow-400 rounded text-xs hover:bg-yellow-600/50 disabled:opacity-50 disabled:cursor-not-allowed"
+
+        {/* Quick select from dropdown */}
+        <select
+          value={targetNodeId}
+          onChange={(e) => setTargetNodeId(e.target.value)}
+          className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-white mb-2"
         >
-          Find Causal Paths
-        </button>
+          <option value="">Or select from list...</option>
+          {allNodes.slice(0, 50).map((node) => (
+            <option key={node.id} value={node.id}>
+              {node.label}
+            </option>
+          ))}
+        </select>
+
+        {/* Path summary */}
         {selectedNode && targetNode && (
-          <p className="text-xs text-gray-500 mt-1">
-            From: {selectedNode.label} → To: {targetNode.label}
-          </p>
+          <div className="bg-gray-800 rounded p-2 mb-2">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-blue-400 font-medium truncate max-w-[80px]" title={selectedNode.label}>
+                {selectedNode.label}
+              </span>
+              <span className="text-yellow-400">→→→</span>
+              <span className="text-green-400 font-medium truncate max-w-[80px]" title={targetNode.label}>
+                {targetNode.label}
+              </span>
+            </div>
+          </div>
         )}
+
+        {/* Action buttons */}
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={() => handleQuery('path')}
+            disabled={!selectedNodeId || !targetNodeId}
+            className="px-3 py-2 bg-yellow-600 text-white rounded text-xs font-medium hover:bg-yellow-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            Find Shortest Path
+          </button>
+          <button
+            onClick={() => handleQuery('allPaths')}
+            disabled={!selectedNodeId || !targetNodeId}
+            className="px-3 py-2 bg-gray-700 text-gray-300 rounded text-xs hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            All Paths (max 10)
+          </button>
+        </div>
       </div>
 
       {/* Query Results */}
@@ -240,29 +292,90 @@ export function CausalQueryPanel({ onNodeClick }: CausalQueryPanelProps) {
           {/* Paths Display */}
           {queryResult.paths && queryResult.paths.length > 0 && (
             <div className="mb-3">
-              <p className="text-xs text-gray-400 mb-1">
-                Found {queryResult.paths.length} path(s):
-              </p>
-              <div className="max-h-24 overflow-y-auto space-y-1">
-                {queryResult.paths.slice(0, 5).map((path, i) => (
-                  <div key={i} className="text-xs text-gray-300 bg-gray-800 rounded px-2 py-1">
-                    {path.map((nodeId, j) => {
+              {/* Shortest Path Highlight */}
+              {queryResult.paths[0] && (
+                <div className="bg-yellow-900/30 border border-yellow-700 rounded-lg p-3 mb-2">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-medium text-yellow-400">
+                      Shortest Path ({queryResult.paths[0].length - 1} steps)
+                    </span>
+                    <button
+                      onClick={handleHighlight}
+                      className="text-xs px-2 py-0.5 bg-yellow-600 text-white rounded hover:bg-yellow-700"
+                    >
+                      Highlight in Graph
+                    </button>
+                  </div>
+                  <div className="space-y-1">
+                    {queryResult.paths[0].map((nodeId, j) => {
                       const node = graph.getNode(nodeId);
+                      const isFirst = j === 0;
+                      const isLast = j === queryResult.paths![0].length - 1;
                       return (
-                        <span key={nodeId}>
-                          <span className="text-blue-400">{node?.label || nodeId}</span>
-                          {j < path.length - 1 && <span className="text-gray-500"> → </span>}
-                        </span>
+                        <div key={nodeId} className="flex items-center gap-2">
+                          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold ${
+                            isFirst ? 'bg-blue-600 text-white' :
+                            isLast ? 'bg-green-600 text-white' :
+                            'bg-gray-600 text-gray-200'
+                          }`}>
+                            {j + 1}
+                          </span>
+                          <button
+                            onClick={() => handleNodeClick(node!)}
+                            className={`text-sm hover:underline ${
+                              isFirst ? 'text-blue-400' :
+                              isLast ? 'text-green-400' :
+                              'text-gray-300'
+                            }`}
+                          >
+                            {node?.label || nodeId}
+                          </button>
+                          {node?.domain && (
+                            <span className="text-xs text-gray-500">({node.domain})</span>
+                          )}
+                        </div>
                       );
                     })}
                   </div>
-                ))}
-                {queryResult.paths.length > 5 && (
-                  <p className="text-xs text-gray-500">
-                    ...and {queryResult.paths.length - 5} more
+                </div>
+              )}
+
+              {/* Alternative Paths */}
+              {queryResult.paths.length > 1 && (
+                <div>
+                  <p className="text-xs text-gray-400 mb-1">
+                    {queryResult.paths.length - 1} alternative path(s):
                   </p>
-                )}
-              </div>
+                  <div className="max-h-24 overflow-y-auto space-y-1">
+                    {queryResult.paths.slice(1, 6).map((path, i) => (
+                      <div key={i} className="text-xs text-gray-300 bg-gray-800 rounded px-2 py-1.5">
+                        <span className="text-gray-500 mr-2">{path.length - 1} steps:</span>
+                        {path.map((nodeId, j) => {
+                          const node = graph.getNode(nodeId);
+                          return (
+                            <span key={nodeId}>
+                              <span className="text-gray-300">{node?.label || nodeId}</span>
+                              {j < path.length - 1 && <span className="text-yellow-500"> → </span>}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    ))}
+                    {queryResult.paths.length > 6 && (
+                      <p className="text-xs text-gray-500">
+                        ...and {queryResult.paths.length - 6} more paths
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* No path found */}
+              {queryResult.paths.length === 0 && queryResult.query === 'path' && (
+                <div className="bg-red-900/30 border border-red-700 rounded p-2 text-xs text-red-400">
+                  No causal path found between these nodes
+                </div>
+              )}
             </div>
           )}
 
