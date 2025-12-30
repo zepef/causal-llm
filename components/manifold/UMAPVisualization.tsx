@@ -125,6 +125,8 @@ export function UMAPVisualization({
   const selectNode = useGraphStore((state) => state.selectNode);
   const highlightNeighbors = useGraphStore((state) => state.highlightNeighbors);
   const analytics = useGraphStore((state) => state.analytics);
+  const filteredNodeIds = useGraphStore((state) => state.filteredNodeIds);
+  const filteredEdgeIds = useGraphStore((state) => state.filteredEdgeIds);
 
   // Get embedding data
   const umap3dProjections = useEmbeddingStore((state) => state.umap3dProjections);
@@ -219,8 +221,18 @@ export function UMAPVisualization({
 
   // Transform store data to graph format
   const graphData: GraphData = useMemo(() => {
-    const nodes = graph.getAllNodes();
-    const edges = graph.getAllEdges();
+    const allNodes = graph.getAllNodes();
+    const allEdges = graph.getAllEdges();
+
+    // Apply node filters
+    const nodes = filteredNodeIds
+      ? allNodes.filter(node => filteredNodeIds.has(node.id))
+      : allNodes;
+
+    // Apply edge filters
+    const edges = filteredEdgeIds
+      ? allEdges.filter(edge => filteredEdgeIds.has(edge.id))
+      : allEdges;
 
     const graphNodes: GraphNode[] = nodes.map((node) => {
       const projection = umap3dProjections.get(node.id);
@@ -285,7 +297,7 @@ export function UMAPVisualization({
       : [];
 
     return { nodes: graphNodes, links: graphLinks };
-  }, [graph, umap3dProjections, selectedNodeId, highlightedNodes, showConnections, getNodeSize, colorBy, communityMap, analytics]);
+  }, [graph, umap3dProjections, selectedNodeId, highlightedNodes, showConnections, getNodeSize, colorBy, communityMap, analytics, filteredNodeIds, filteredEdgeIds]);
 
   // Handle node click
   const handleNodeClick = useCallback(
@@ -401,8 +413,8 @@ export function UMAPVisualization({
 
       {/* Stats overlay */}
       <div className="absolute bottom-4 left-4 bg-black/70 text-white text-xs px-3 py-2 rounded-lg">
-        <div>{graphData.nodes.length} nodes</div>
-        <div>{graphData.links.length} edges</div>
+        <div>{graphData.nodes.length} nodes{filteredNodeIds && ` (filtered)`}</div>
+        <div>{graphData.links.length} edges{filteredEdgeIds && ` (filtered)`}</div>
       </div>
 
       {/* Controls hint */}
