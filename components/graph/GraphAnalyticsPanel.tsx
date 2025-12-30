@@ -3,14 +3,27 @@
 // DEMOCRITUS - Graph Analytics Panel
 // UI for displaying graph analytics and centrality measures
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useGraphStore, useGraphAnalytics } from '@/stores/graphStore';
 
 interface GraphAnalyticsPanelProps {
   onNodeClick?: (nodeId: string) => void;
 }
 
+// Cycle colors for visualization
+const CYCLE_COLORS = [
+  '#eab308', // yellow
+  '#f97316', // orange
+  '#ef4444', // red
+  '#ec4899', // pink
+  '#a855f7', // purple
+  '#6366f1', // indigo
+];
+
 export function GraphAnalyticsPanel({ onNodeClick }: GraphAnalyticsPanelProps) {
+  const [selectedCycleIdx, setSelectedCycleIdx] = useState<number | null>(null);
+  const [showAllCycles, setShowAllCycles] = useState(false);
+
   const graph = useGraphStore((s) => s.graph);
   const analytics = useGraphAnalytics();
   const analyticsComputed = useGraphStore((s) => s.analyticsComputed);
@@ -18,6 +31,8 @@ export function GraphAnalyticsPanel({ onNodeClick }: GraphAnalyticsPanelProps) {
   const clearAnalytics = useGraphStore((s) => s.clearAnalytics);
   const selectNode = useGraphStore((s) => s.selectNode);
   const highlightNeighbors = useGraphStore((s) => s.highlightNeighbors);
+  const setFilteredNodeIds = useGraphStore((s) => s.setFilteredNodeIds);
+  const clearHighlights = useGraphStore((s) => s.clearHighlights);
 
   // Sort nodes by different centrality measures
   const topPageRank = useMemo(() => {
@@ -65,10 +80,40 @@ export function GraphAnalyticsPanel({ onNodeClick }: GraphAnalyticsPanelProps) {
   // Summary stats
   const connectedComponentCount = analytics?.connectedComponents?.length || 0;
   const sccCount = analytics?.stronglyConnectedComponents?.length || 0;
-  const cycleCount = analytics?.stronglyConnectedComponents?.filter(
-    (scc) => scc.length > 1
-  ).length || 0;
+  const cycles = useMemo(() =>
+    analytics?.stronglyConnectedComponents?.filter((scc) => scc.length > 1) || [],
+    [analytics?.stronglyConnectedComponents]
+  );
+  const cycleCount = cycles.length;
   const communityCount = analytics?.communities?.length || 0;
+
+  // Highlight a specific cycle
+  const highlightCycle = (cycleIdx: number) => {
+    const cycle = cycles[cycleIdx];
+    if (!cycle) return;
+
+    setSelectedCycleIdx(cycleIdx);
+    setFilteredNodeIds(new Set(cycle));
+  };
+
+  // Highlight all cycles
+  const highlightAllCycles = () => {
+    const allCycleNodes = new Set<string>();
+    cycles.forEach(cycle => {
+      cycle.forEach(nodeId => allCycleNodes.add(nodeId));
+    });
+    setFilteredNodeIds(allCycleNodes);
+    setShowAllCycles(true);
+    setSelectedCycleIdx(null);
+  };
+
+  // Clear cycle highlighting
+  const clearCycleHighlight = () => {
+    setFilteredNodeIds(null);
+    setSelectedCycleIdx(null);
+    setShowAllCycles(false);
+    clearHighlights();
+  };
 
   return (
     <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
@@ -256,30 +301,123 @@ export function GraphAnalyticsPanel({ onNodeClick }: GraphAnalyticsPanelProps) {
           {/* Cycles / Strongly Connected Components */}
           {cycleCount > 0 && (
             <div>
-              <h4 className="text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
-                <span className="w-2 h-2 bg-yellow-500 rounded-full"></span>
-                Causal Cycles (Feedback Loops)
-              </h4>
-              <div className="space-y-1 max-h-32 overflow-y-auto">
-                {analytics?.stronglyConnectedComponents
-                  ?.filter((scc) => scc.length > 1)
-                  .slice(0, 5)
-                  .map((scc, i) => (
-                    <div
-                      key={i}
-                      className="px-2 py-1.5 bg-gray-800 rounded text-xs"
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-sm font-medium text-gray-300 flex items-center gap-2">
+                  <span className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></span>
+                  Causal Cycles ({cycleCount})
+                </h4>
+                <div className="flex gap-1">
+                  {(selectedCycleIdx !== null || showAllCycles) && (
+                    <button
+                      onClick={clearCycleHighlight}
+                      className="text-xs px-2 py-0.5 bg-gray-700 text-gray-300 rounded hover:bg-gray-600"
                     >
-                      <span className="text-yellow-400">{scc.length} nodes: </span>
-                      <span className="text-gray-300">
-                        {scc
-                          .slice(0, 3)
-                          .map((id) => graph.getNode(id)?.label || id)
-                          .join(' → ')}
-                        {scc.length > 3 && ` ... → ${graph.getNode(scc[0])?.label || scc[0]}`}
-                      </span>
-                    </div>
-                  ))}
+                      Clear
+                    </button>
+                  )}
+                  <button
+                    onClick={highlightAllCycles}
+                    className={`text-xs px-2 py-0.5 rounded ${
+                      showAllCycles
+                        ? 'bg-yellow-600 text-white'
+                        : 'bg-yellow-600/30 text-yellow-400 hover:bg-yellow-600/50'
+                    }`}
+                  >
+                    Show All
+                  </button>
+                </div>
               </div>
+
+              <div className="space-y-2 max-h-48 overflow-y-auto">
+                {cycles.slice(0, 8).map((cycle, i) => {
+                  const color = CYCLE_COLORS[i % CYCLE_COLORS.length];
+                  const isSelected = selectedCycleIdx === i;
+
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => highlightCycle(i)}
+                      className={`w-full text-left p-2 rounded-lg transition-all ${
+                        isSelected
+                          ? 'ring-2 ring-yellow-500 bg-yellow-900/40'
+                          : 'bg-gray-800 hover:bg-gray-750'
+                      }`}
+                    >
+                      {/* Cycle header */}
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="w-3 h-3 rounded-full"
+                            style={{ backgroundColor: color }}
+                          />
+                          <span className="text-xs font-medium text-white">
+                            Cycle {i + 1}
+                          </span>
+                        </div>
+                        <span className="text-xs text-gray-400">
+                          {cycle.length} nodes
+                        </span>
+                      </div>
+
+                      {/* Cycle path visualization */}
+                      <div className="flex flex-wrap items-center gap-1 text-xs">
+                        {cycle.slice(0, 4).map((nodeId, j) => {
+                          const node = graph.getNode(nodeId);
+                          return (
+                            <span key={nodeId} className="flex items-center">
+                              <span
+                                className="px-1.5 py-0.5 rounded text-white truncate max-w-[70px]"
+                                style={{ backgroundColor: color + '80' }}
+                                title={node?.label || nodeId}
+                              >
+                                {node?.label || nodeId}
+                              </span>
+                              {j < Math.min(cycle.length, 4) - 1 && (
+                                <span className="text-yellow-500 mx-0.5">→</span>
+                              )}
+                            </span>
+                          );
+                        })}
+                        {cycle.length > 4 && (
+                          <span className="text-gray-500">
+                            +{cycle.length - 4} more
+                          </span>
+                        )}
+                        <span className="text-yellow-500">↺</span>
+                      </div>
+
+                      {/* Feedback loop indicator */}
+                      {isSelected && (
+                        <div className="mt-2 pt-2 border-t border-gray-700">
+                          <p className="text-xs text-yellow-400">
+                            🔄 Feedback loop: changes propagate back to source
+                          </p>
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+
+                {cycles.length > 8 && (
+                  <p className="text-xs text-gray-500 text-center py-1">
+                    +{cycles.length - 8} more cycles
+                  </p>
+                )}
+              </div>
+
+              {/* Cycle explanation */}
+              <p className="text-xs text-gray-500 mt-2">
+                Cycles indicate feedback loops where effects can influence their own causes.
+              </p>
+            </div>
+          )}
+
+          {/* No cycles message */}
+          {cycleCount === 0 && analyticsComputed && (
+            <div className="bg-green-900/20 border border-green-800 rounded p-2">
+              <p className="text-xs text-green-400">
+                ✓ No causal cycles detected - graph is acyclic (DAG)
+              </p>
             </div>
           )}
 
