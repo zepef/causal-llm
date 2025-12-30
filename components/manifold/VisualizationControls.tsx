@@ -122,10 +122,16 @@ export function VisualizationControls({
             className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white"
           >
             <option value="domain">Domain</option>
+            <option value="community">Community</option>
             <option value="centrality">Centrality</option>
             <option value="cluster">Cluster</option>
             <option value="none">None</option>
           </select>
+          {(colorBy === 'community' || colorBy === 'centrality') && !analyticsComputed && (
+            <p className="text-xs text-yellow-500 mt-1">
+              Compute analytics for {colorBy} coloring
+            </p>
+          )}
         </div>
 
         {/* Size by */}

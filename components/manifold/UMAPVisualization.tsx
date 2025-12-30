@@ -59,6 +59,22 @@ const RELATION_COLORS: Record<string, string> = {
   default: '#4b5563',
 };
 
+// Community color palette (distinct, vibrant colors)
+const COMMUNITY_COLORS = [
+  '#22c55e', // green
+  '#3b82f6', // blue
+  '#a855f7', // purple
+  '#ec4899', // pink
+  '#f97316', // orange
+  '#06b6d4', // cyan
+  '#f43f5e', // rose
+  '#6366f1', // indigo
+  '#eab308', // yellow
+  '#14b8a6', // teal
+  '#8b5cf6', // violet
+  '#84cc16', // lime
+];
+
 interface GraphNode {
   id: string;
   label: string;
@@ -116,6 +132,20 @@ export function UMAPVisualization({
   const connectionOpacity = useEmbeddingStore((state) => state.connectionOpacity);
   const hoverEmbedding = useEmbeddingStore((state) => state.hoverEmbedding);
   const sizeBy = useEmbeddingStore((state) => state.sizeBy);
+  const colorBy = useEmbeddingStore((state) => state.colorBy);
+
+  // Build community lookup map
+  const communityMap = useMemo(() => {
+    const map = new Map<string, number>();
+    if (analytics?.communities) {
+      analytics.communities.forEach((community, index) => {
+        for (const nodeId of community.nodes) {
+          map.set(nodeId, index);
+        }
+      });
+    }
+    return map;
+  }, [analytics?.communities]);
 
   // Handle container resize
   useEffect(() => {
@@ -198,11 +228,36 @@ export function UMAPVisualization({
       const isSelected = selectedNodeId === node.id;
 
       // Determine color based on colorBy setting
-      let color = DOMAIN_COLORS[node.domain || 'default'] || DOMAIN_COLORS.default;
+      let color: string;
       if (isSelected) {
         color = '#ffffff';
       } else if (isHighlighted) {
         color = '#fbbf24'; // amber highlight
+      } else {
+        switch (colorBy) {
+          case 'community': {
+            const communityIdx = communityMap.get(node.id);
+            color = communityIdx !== undefined
+              ? COMMUNITY_COLORS[communityIdx % COMMUNITY_COLORS.length]
+              : DOMAIN_COLORS.default;
+            break;
+          }
+          case 'centrality': {
+            // Color by PageRank centrality (gradient from blue to red)
+            const score = analytics?.pageRank?.get(node.id) || 0;
+            const normalized = Math.min(score * 20, 1); // Scale up for visibility
+            const r = Math.round(normalized * 255);
+            const b = Math.round((1 - normalized) * 255);
+            color = `rgb(${r}, 100, ${b})`;
+            break;
+          }
+          case 'none':
+            color = '#6b7280'; // gray
+            break;
+          case 'domain':
+          default:
+            color = DOMAIN_COLORS[node.domain || 'default'] || DOMAIN_COLORS.default;
+        }
       }
 
       // Determine size based on sizeBy setting
@@ -230,7 +285,7 @@ export function UMAPVisualization({
       : [];
 
     return { nodes: graphNodes, links: graphLinks };
-  }, [graph, umap3dProjections, selectedNodeId, highlightedNodes, showConnections, getNodeSize]);
+  }, [graph, umap3dProjections, selectedNodeId, highlightedNodes, showConnections, getNodeSize, colorBy, communityMap, analytics]);
 
   // Handle node click
   const handleNodeClick = useCallback(

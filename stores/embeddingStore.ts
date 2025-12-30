@@ -39,7 +39,7 @@ interface EmbeddingState {
   hoveredEmbeddingId: string | null;
 
   // View settings
-  colorBy: 'domain' | 'centrality' | 'cluster' | 'none';
+  colorBy: 'domain' | 'community' | 'centrality' | 'cluster' | 'none';
   sizeBy: 'degree' | 'pagerank' | 'betweenness' | 'closeness' | 'uniform';
   showConnections: boolean;
   connectionOpacity: number;
