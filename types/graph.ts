@@ -254,4 +254,16 @@ export interface GraphAnalytics {
   closeness: Map<string, number>;
   connectedComponents: string[][];
   stronglyConnectedComponents: string[][];
+  communities: Community[];
+}
+
+/**
+ * A detected community in the graph
+ */
+export interface Community {
+  id: number;
+  nodes: string[];
+  size: number;
+  density: number;
+  label?: string;
 }

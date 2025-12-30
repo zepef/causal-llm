@@ -8,6 +8,7 @@ import type {
   SimplicialComplex,
   GraphStats,
   GraphAnalytics,
+  Community,
   SerializedGraph,
   CausalGraphData,
 } from '@/types/graph';
@@ -722,15 +723,152 @@ export class CausalGraph {
   }
 
   /**
+   * Detect communities using Label Propagation Algorithm (LPA)
+   * Nodes adopt the label that most of their neighbors have
+   * @param maxIterations - Maximum iterations (default 100)
+   */
+  detectCommunities(maxIterations: number = 100): Community[] {
+    const nodes = this.getAllNodes();
+    if (nodes.length === 0) return [];
+
+    // Initialize: each node in its own community
+    const labels = new Map<string, number>();
+    nodes.forEach((node, i) => labels.set(node.id, i));
+
+    // Iterate until convergence or max iterations
+    let changed = true;
+    let iteration = 0;
+
+    while (changed && iteration < maxIterations) {
+      changed = false;
+      iteration++;
+
+      // Process nodes in random order for better convergence
+      const shuffledNodes = [...nodes].sort(() => Math.random() - 0.5);
+
+      for (const node of shuffledNodes) {
+        const neighbors = this.getAllNeighbors(node.id);
+        if (neighbors.length === 0) continue;
+
+        // Count label frequencies among neighbors
+        const labelCounts = new Map<number, number>();
+        for (const neighborId of neighbors) {
+          const label = labels.get(neighborId)!;
+          labelCounts.set(label, (labelCounts.get(label) || 0) + 1);
+        }
+
+        // Find the most frequent label
+        let maxCount = 0;
+        let maxLabel = labels.get(node.id)!;
+        for (const [label, count] of labelCounts) {
+          if (count > maxCount) {
+            maxCount = count;
+            maxLabel = label;
+          }
+        }
+
+        // Update label if different
+        if (maxLabel !== labels.get(node.id)) {
+          labels.set(node.id, maxLabel);
+          changed = true;
+        }
+      }
+    }
+
+    // Group nodes by their final labels
+    const communityMap = new Map<number, string[]>();
+    for (const [nodeId, label] of labels) {
+      if (!communityMap.has(label)) {
+        communityMap.set(label, []);
+      }
+      communityMap.get(label)!.push(nodeId);
+    }
+
+    // Convert to Community objects and calculate density
+    const communities: Community[] = [];
+    let communityId = 0;
+
+    for (const [, nodeIds] of communityMap) {
+      if (nodeIds.length < 1) continue;
+
+      // Calculate internal density
+      let internalEdges = 0;
+      const nodeSet = new Set(nodeIds);
+      for (const nodeId of nodeIds) {
+        for (const neighbor of this.getAllNeighbors(nodeId)) {
+          if (nodeSet.has(neighbor)) {
+            internalEdges++;
+          }
+        }
+      }
+      // Each edge counted twice (from both endpoints), and for directed graph
+      internalEdges = Math.floor(internalEdges / 2);
+
+      const maxEdges = nodeIds.length * (nodeIds.length - 1) / 2;
+      const density = maxEdges > 0 ? internalEdges / maxEdges : 1;
+
+      // Generate a label from the most central node
+      const centralNode = nodeIds
+        .map(id => ({ id, degree: this.getDegree(id) }))
+        .sort((a, b) => b.degree - a.degree)[0];
+      const labelNode = this.getNode(centralNode.id);
+
+      communities.push({
+        id: communityId++,
+        nodes: nodeIds,
+        size: nodeIds.length,
+        density,
+        label: labelNode?.label || `Community ${communityId}`,
+      });
+    }
+
+    // Sort by size descending
+    return communities.sort((a, b) => b.size - a.size);
+  }
+
+  /**
+   * Calculate modularity of a community partition
+   * Higher modularity indicates better community structure
+   */
+  calculateModularity(communities: Community[]): number {
+    const m = this.edges.size; // Total edges
+    if (m === 0) return 0;
+
+    let modularity = 0;
+
+    for (const community of communities) {
+      const nodeSet = new Set(community.nodes);
+
+      for (const nodeI of community.nodes) {
+        for (const nodeJ of community.nodes) {
+          // Actual edge
+          const aij = this.areConnected(nodeI, nodeJ) ? 1 : 0;
+
+          // Expected edges (degree product / 2m)
+          const ki = this.getDegree(nodeI);
+          const kj = this.getDegree(nodeJ);
+          const expected = (ki * kj) / (2 * m);
+
+          modularity += aij - expected;
+        }
+      }
+    }
+
+    return modularity / (2 * m);
+  }
+
+  /**
    * Get comprehensive analytics for the graph
    */
   getAnalytics(): GraphAnalytics {
+    const communities = this.detectCommunities();
     return {
       pageRank: this.calculatePageRank(),
       betweenness: this.calculateBetweennessCentrality(),
       closeness: this.calculateClosenessCentrality(),
       connectedComponents: this.findConnectedComponents().map(c => c.map(n => n.id)),
       stronglyConnectedComponents: this.findStronglyConnectedComponents().map(c => c.map(n => n.id)),
+      communities,
     };
   }
 

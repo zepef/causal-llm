@@ -68,6 +68,7 @@ export function GraphAnalyticsPanel({ onNodeClick }: GraphAnalyticsPanelProps) {
   const cycleCount = analytics?.stronglyConnectedComponents?.filter(
     (scc) => scc.length > 1
   ).length || 0;
+  const communityCount = analytics?.communities?.length || 0;
 
   return (
     <div className="bg-gray-900 rounded-lg p-4 border border-gray-800">
@@ -98,7 +99,11 @@ export function GraphAnalyticsPanel({ onNodeClick }: GraphAnalyticsPanelProps) {
       ) : (
         <div className="space-y-4">
           {/* Summary Stats */}
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-4 gap-2">
+            <div className="bg-gray-800 rounded p-2 text-center">
+              <div className="text-lg font-bold text-green-400">{communityCount}</div>
+              <div className="text-xs text-gray-500">Communities</div>
+            </div>
             <div className="bg-gray-800 rounded p-2 text-center">
               <div className="text-lg font-bold text-white">{connectedComponentCount}</div>
               <div className="text-xs text-gray-500">Components</div>
@@ -191,6 +196,63 @@ export function GraphAnalyticsPanel({ onNodeClick }: GraphAnalyticsPanelProps) {
             </div>
           </div>
 
+          {/* Communities */}
+          {analytics?.communities && analytics.communities.length > 0 && (
+            <div>
+              <h4 className="text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
+                <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+                Communities ({analytics.communities.length})
+              </h4>
+              <div className="space-y-1 max-h-40 overflow-y-auto">
+                {analytics.communities.slice(0, 8).map((community, i) => {
+                  const colors = [
+                    'bg-green-600', 'bg-blue-600', 'bg-purple-600', 'bg-pink-600',
+                    'bg-orange-600', 'bg-cyan-600', 'bg-rose-600', 'bg-indigo-600'
+                  ];
+                  const bgColor = colors[i % colors.length];
+
+                  return (
+                    <div
+                      key={community.id}
+                      className="px-2 py-1.5 bg-gray-800 rounded text-xs"
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="flex items-center gap-2">
+                          <span className={`w-3 h-3 ${bgColor} rounded-sm`}></span>
+                          <span className="text-white font-medium truncate max-w-[120px]">
+                            {community.label}
+                          </span>
+                        </span>
+                        <span className="text-gray-400">
+                          {community.size} nodes
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 ml-5">
+                        <span className="text-gray-500">Density:</span>
+                        <div className="flex-1 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full ${bgColor}`}
+                            style={{ width: `${community.density * 100}%` }}
+                          />
+                        </div>
+                        <span className="text-gray-400 w-10 text-right">
+                          {(community.density * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                      <div className="mt-1 ml-5 text-gray-500 truncate">
+                        {community.nodes
+                          .slice(0, 3)
+                          .map((id) => graph.getNode(id)?.label || id)
+                          .join(', ')}
+                        {community.nodes.length > 3 && ` +${community.nodes.length - 3} more`}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Cycles / Strongly Connected Components */}
           {cycleCount > 0 && (
             <div>
@@ -223,6 +285,7 @@ export function GraphAnalyticsPanel({ onNodeClick }: GraphAnalyticsPanelProps) {
 
           {/* Legend */}
           <div className="text-xs text-gray-500 pt-2 border-t border-gray-800">
+            <p><strong>Communities:</strong> Groups of densely connected nodes (Label Propagation)</p>
             <p><strong>PageRank:</strong> Nodes that receive many incoming edges from important nodes</p>
             <p><strong>Betweenness:</strong> Nodes that lie on many shortest paths (bridges)</p>
             <p><strong>Closeness:</strong> Nodes that can quickly reach many other nodes</p>
