@@ -10,6 +10,7 @@ import { VisualizationFilters } from '@/components/manifold/VisualizationFilters
 import { CausalQueryPanel } from '@/components/graph/CausalQueryPanel';
 import { GraphAnalyticsPanel } from '@/components/graph/GraphAnalyticsPanel';
 import { GraphExport } from '@/components/manifold/GraphExport';
+import { GraphImport } from '@/components/manifold/GraphImport';
 import { useGraphStore } from '@/stores/graphStore';
 import { useEmbeddingStore, useComputationStatus } from '@/stores/embeddingStore';
 import { usePipelineStore } from '@/stores/pipelineStore';
@@ -598,8 +599,11 @@ export default function ManifoldPage() {
               </div>
             )}
 
-            {/* Graph Export */}
-            <GraphExport />
+            {/* Graph Import/Export */}
+            <div className="grid grid-cols-2 gap-3">
+              <GraphImport />
+              <GraphExport />
+            </div>
           </>
         )}
 
